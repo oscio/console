@@ -28,7 +28,7 @@ spec:
       containers:
         - name: web
           image: cr.dev.openschema.io/agent-platform/console-web:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 3000
