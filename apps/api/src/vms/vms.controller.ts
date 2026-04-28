@@ -60,12 +60,14 @@ export class VmsController {
     })
   }
 
-  @Delete(":name")
+  // Path param is the random slug (the K8s resource name), NOT the
+  // human-readable display name — display names aren't unique.
+  @Delete(":slug")
   @HttpCode(204)
   async delete(
-    @Param("name") name: string,
+    @Param("slug") slug: string,
     @CurrentSession() session: AppSession,
   ) {
-    await this.vms.delete(session.user.id, name)
+    await this.vms.delete(session.user.id, slug)
   }
 }

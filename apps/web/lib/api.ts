@@ -92,6 +92,7 @@ export type VmStatus = "Pending" | "Running" | "Failed" | "Unknown"
 
 export type Vm = {
   id: string
+  slug: string
   name: string
   owner: string
   namespace: string
@@ -139,12 +140,14 @@ export async function createVm(
   return (await res.json()) as Vm
 }
 
+// Identifies the VM by its random slug (K8s resource name), not the
+// user's display name — display names aren't unique.
 export async function deleteVm(
   cookieHeader: string,
-  name: string,
+  slug: string,
 ): Promise<void> {
   const res = await fetch(
-    `${API_URL}/vms/${encodeURIComponent(name)}`,
+    `${API_URL}/vms/${encodeURIComponent(slug)}`,
     { method: "DELETE", headers: { cookie: cookieHeader }, cache: "no-store" },
   )
   if (!res.ok && res.status !== 404) {

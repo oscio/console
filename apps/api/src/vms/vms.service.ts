@@ -5,11 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common"
+import { randomBytes } from "node:crypto"
 import { k8sApps, k8sCore } from "./k8s.client"
 import {
   CreateVmInput,
   Vm,
   VM_AGENT_TYPE_LABEL,
+  VM_DISPLAY_NAME_ANNOTATION,
   VM_IMAGE_TYPE_LABEL,
   VM_LABEL,
   VM_LABEL_VALUE,
@@ -19,10 +21,6 @@ import {
   VmStatus,
 } from "./vms.types"
 
-// DNS-1035 label: must start with a letter (Service names enforce this,
-// stricter than DNS-1123). Lowercase letters/digits/hyphens, end alnum,
-// max 63 chars. Used for VM name → StatefulSet, Service, hostname.
-const DNS_1035 = /^[a-z]([-a-z0-9]*[a-z0-9])?$/
 const NS_PREFIX = "resource-vm-"
 
 function sanitizeLabel(value: string): string {
@@ -31,6 +29,12 @@ function sanitizeLabel(value: string): string {
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 63)
+}
+
+// Random slug used as the K8s resource name + hostname. Always
+// DNS-1035-valid: starts with a letter, lowercase alnum, length 11.
+function randomSlug(): string {
+  return `vm-${randomBytes(4).toString("hex")}`
 }
 
 function ownerNamespace(ownerId: string): string {
@@ -103,12 +107,12 @@ export class VmsService {
   }
 
   async create(ownerId: string, input: CreateVmInput): Promise<Vm> {
-    const name = sanitizeLabel(input.name)
-    if (!DNS_1035.test(name)) {
-      throw new BadRequestException(
-        "name must start with a letter and contain only lowercase letters, digits, and hyphens.",
-      )
+    const displayName = input.name.trim()
+    if (!displayName) throw new BadRequestException("name is required")
+    if (displayName.length > 200) {
+      throw new BadRequestException("name must be 200 characters or fewer")
     }
+    const slug = randomSlug()
     const ns = ownerNamespace(ownerId)
     const image = this.imageFor(input.imageType)
     const storage = input.storageSize ?? "10Gi"
@@ -116,9 +120,9 @@ export class VmsService {
     await this.ensureNamespace(ns, ownerId)
 
     // Create the headless Service first so the StatefulSet's stable DNS
-    // (`<name>-0.<svc>.<ns>.svc.cluster.local`) resolves the moment the
+    // (`<slug>-0.<svc>.<ns>.svc.cluster.local`) resolves the moment the
     // pod comes up.
-    await this.ensureService(ns, name, input.imageType)
+    await this.ensureService(ns, slug, input.imageType)
 
     const apps = k8sApps()
     try {
@@ -128,19 +132,20 @@ export class VmsService {
           apiVersion: "apps/v1",
           kind: "StatefulSet",
           metadata: {
-            name,
+            name: slug,
             namespace: ns,
             labels: this.vmLabels(ownerId, input.imageType, input.agentType),
+            annotations: { [VM_DISPLAY_NAME_ANNOTATION]: displayName },
           },
           spec: {
-            serviceName: name,
+            serviceName: slug,
             replicas: 1,
-            selector: { matchLabels: { "agent-platform/vm-name": name } },
+            selector: { matchLabels: { "agent-platform/vm-slug": slug } },
             template: {
               metadata: {
                 labels: {
                   ...this.vmLabels(ownerId, input.imageType, input.agentType),
-                  "agent-platform/vm-name": name,
+                  "agent-platform/vm-slug": slug,
                 },
               },
               spec: {
@@ -161,7 +166,8 @@ export class VmsService {
                     ],
                     env: [
                       { name: "VM_OWNER", value: ownerId },
-                      { name: "VM_NAME", value: name },
+                      { name: "VM_SLUG", value: slug },
+                      { name: "VM_NAME", value: displayName },
                       { name: "VM_AGENT", value: input.agentType },
                     ],
                     volumeMounts: [
@@ -187,40 +193,43 @@ export class VmsService {
       const code = (err as { code?: number; statusCode?: number }).code
         ?? (err as { statusCode?: number }).statusCode
       if (code === 409) {
-        throw new ConflictException(`VM "${name}" already exists in ${ns}.`)
+        // randomSlug() collisions are astronomically unlikely; this
+        // mostly fires when something else (a previous failed create)
+        // left a leftover.
+        throw new ConflictException(`VM "${slug}" already exists in ${ns}.`)
       }
-      rethrowK8sError(err, `Failed to create VM "${name}"`)
+      rethrowK8sError(err, `Failed to create VM "${slug}"`)
     }
 
     const vms = await this.listForOwner(ownerId)
-    const created = vms.find((v) => v.name === name)
+    const created = vms.find((v) => v.slug === slug)
     if (!created) throw new NotFoundException("VM created but not found.")
     return created
   }
 
-  async delete(ownerId: string, name: string): Promise<void> {
-    const slug = sanitizeLabel(name)
-    if (!DNS_1035.test(slug)) {
-      throw new BadRequestException("Invalid VM name.")
-    }
+  // Delete by slug — the random ID we own. The display name is not
+  // unique and not safe to look up by.
+  async delete(ownerId: string, slug: string): Promise<void> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug) throw new BadRequestException("Invalid VM slug.")
     const ns = ownerNamespace(ownerId)
     const apps = k8sApps()
     const core = k8sCore()
     await apps
-      .deleteNamespacedStatefulSet({ name: slug, namespace: ns })
+      .deleteNamespacedStatefulSet({ name: cleanSlug, namespace: ns })
       .catch((err: { code?: number; statusCode?: number }) => {
         if ((err.code ?? err.statusCode) === 404) return
         throw err
       })
     await core
-      .deleteNamespacedService({ name: slug, namespace: ns })
+      .deleteNamespacedService({ name: cleanSlug, namespace: ns })
       .catch(() => undefined)
     // PVCs created from volumeClaimTemplates aren't garbage-collected on
     // StatefulSet delete; remove them so storage isn't leaked.
     await core
       .deleteCollectionNamespacedPersistentVolumeClaim({
         namespace: ns,
-        labelSelector: `agent-platform/vm-name=${slug}`,
+        labelSelector: `agent-platform/vm-slug=${cleanSlug}`,
       })
       .catch(() => undefined)
   }
@@ -303,12 +312,22 @@ export class VmsService {
   }
 
   private toVm(sts: {
-    metadata?: { name?: string; namespace?: string; labels?: Record<string, string>; uid?: string; creationTimestamp?: string | Date }
+    metadata?: {
+      name?: string
+      namespace?: string
+      labels?: Record<string, string>
+      annotations?: Record<string, string>
+      uid?: string
+      creationTimestamp?: string | Date
+    }
     status?: { readyReplicas?: number; replicas?: number }
   }): Vm {
-    const name = sts.metadata?.name ?? "unknown"
+    // The K8s resource name IS the slug — we set it that way at create.
+    const slug = sts.metadata?.name ?? "unknown"
     const namespace = sts.metadata?.namespace ?? "unknown"
     const labels = sts.metadata?.labels ?? {}
+    const annotations = sts.metadata?.annotations ?? {}
+    const displayName = annotations[VM_DISPLAY_NAME_ANNOTATION] ?? slug
     const owner = labels[VM_OWNER_LABEL] ?? "unknown"
     const imageType = (labels[VM_IMAGE_TYPE_LABEL] as VmImageType) ?? "base"
     const agentType = (labels[VM_AGENT_TYPE_LABEL] as VmAgentType) ?? "none"
@@ -321,10 +340,11 @@ export class VmsService {
     const ts = sts.metadata?.creationTimestamp
     const createdAt =
       ts instanceof Date ? ts.toISOString() : (ts ?? new Date().toISOString())
-    const hostname = `${name}.${this.vmDomain}`
+    const hostname = `${slug}.${this.vmDomain}`
     return {
-      id: sts.metadata?.uid ?? `${namespace}/${name}`,
-      name,
+      id: sts.metadata?.uid ?? `${namespace}/${slug}`,
+      slug,
+      name: displayName,
       owner,
       namespace,
       imageType,
@@ -335,10 +355,10 @@ export class VmsService {
       // URL convention: one hostname per service (xterm/vnc) so each
       // gets its own HTTPRoute → backend port. Both land on the
       // wildcard `*.vm.<domain>` listener Traefik already serves.
-      xtermUrl: `https://${name}-term.${this.vmDomain}`,
+      xtermUrl: `https://${slug}-term.${this.vmDomain}`,
       vncUrl:
         imageType === "desktop"
-          ? `https://${name}-vnc.${this.vmDomain}`
+          ? `https://${slug}-vnc.${this.vmDomain}`
           : null,
     }
   }

@@ -27,10 +27,10 @@ async function createVmAction(formData: FormData) {
 
 async function deleteVmAction(formData: FormData) {
   "use server"
-  const name = String(formData.get("name") ?? "")
-  if (!name) return
+  const slug = String(formData.get("slug") ?? "")
+  if (!slug) return
   const cookieHeader = (await headers()).get("cookie") ?? ""
-  await deleteVm(cookieHeader, name)
+  await deleteVm(cookieHeader, slug)
   revalidatePath("/vms")
 }
 
@@ -60,6 +60,7 @@ export default async function VmsPage() {
             <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 font-medium">Name</th>
+                <th className="px-3 py-2 font-medium">ID</th>
                 <th className="px-3 py-2 font-medium">Image</th>
                 <th className="px-3 py-2 font-medium">Agent</th>
                 <th className="px-3 py-2 font-medium">Status</th>
@@ -71,7 +72,10 @@ export default async function VmsPage() {
             <tbody className="divide-y">
               {vms.map((vm) => (
                 <tr key={vm.id} className="hover:bg-muted/20">
-                  <td className="px-3 py-2 font-mono text-xs">{vm.name}</td>
+                  <td className="px-3 py-2">{vm.name}</td>
+                  <td className="text-muted-foreground px-3 py-2 font-mono text-xs">
+                    {vm.slug}
+                  </td>
                   <td className="px-3 py-2"><Tag>{vm.imageType}</Tag></td>
                   <td className="px-3 py-2"><Tag>{vm.agentType}</Tag></td>
                   <td className="px-3 py-2">
@@ -94,7 +98,11 @@ export default async function VmsPage() {
                           VNC
                         </LaunchLink>
                       )}
-                      <DeleteVmButton action={deleteVmAction} name={vm.name} />
+                      <DeleteVmButton
+                        action={deleteVmAction}
+                        slug={vm.slug}
+                        label={vm.name}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -102,7 +110,7 @@ export default async function VmsPage() {
               {vms.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="text-muted-foreground px-3 py-6 text-center"
                   >
                     No VMs yet.

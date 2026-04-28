@@ -60,13 +60,13 @@ export function NewVmForm({ action }: { action: Action }) {
         >
           <Field
             label="Name"
-            hint="Lowercase letters, digits, hyphens. Must start with a letter. Becomes the VM hostname."
+            hint="A label just for you. The hostname is auto-generated."
           >
             <Input
               name="name"
               required
-              pattern="[a-z]([-a-z0-9]*[a-z0-9])?"
-              placeholder="my-vm"
+              maxLength={200}
+              placeholder="My dev box"
             />
           </Field>
 
@@ -148,20 +148,22 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 
 export function DeleteVmButton({
   action,
-  name,
+  slug,
+  label,
 }: {
   action: (formData: FormData) => Promise<void>
-  name: string
+  slug: string
+  label: string
 }) {
   const [pending, startTransition] = useTransition()
   return (
     <form
       action={(fd) => {
-        if (!confirm(`Delete VM "${name}"? This is irreversible.`)) return
+        if (!confirm(`Delete VM "${label}" (${slug})? This is irreversible.`)) return
         startTransition(() => action(fd))
       }}
     >
-      <input type="hidden" name="name" value={name} />
+      <input type="hidden" name="slug" value={slug} />
       <Button type="submit" variant="outline" size="sm" disabled={pending}>
         {pending ? "Deleting…" : "Delete"}
       </Button>
