@@ -173,34 +173,38 @@ export class VolumesService {
     }
   }
 
-  // Mark a volume as bound to a VM (sets the bound-to label). Called
-  // by the VMs service during create when a volume is attached.
+  // The k8s-client v1.x defaults patch Content-Type to JSON Patch
+  // (RFC 6902, an array of `{op, path, value}`). The `body` arg is
+  // typed as `object`, but Kubernetes' API server rejects anything
+  // that doesn't decode as `[]jsonPatchOp`. Easiest path: send a
+  // proper JSON Patch array. Forward-slash in label keys is
+  // encoded as `~1` per JSON Pointer (RFC 6901).
   async bindToVm(ownerId: string, volumeSlug: string, vmSlug: string): Promise<void> {
     const ns = ownerNamespace(ownerId)
     const core = k8sCore()
+    const path = jsonPointerLabel(VOLUME_BOUND_TO_LABEL)
     await core
       .patchNamespacedPersistentVolumeClaim({
         name: volumeSlug,
         namespace: ns,
-        body: {
-          metadata: { labels: { [VOLUME_BOUND_TO_LABEL]: vmSlug } },
-        },
+        // `add` semantics: create if absent, replace if present.
+        body: [{ op: "add", path: `/metadata/labels${path}`, value: vmSlug }] as unknown as object,
       })
       .catch((err) => rethrowK8sError(err, `Failed to bind volume "${volumeSlug}"`))
   }
 
   // Inverse of bindToVm — clears the bound-to label so the volume
-  // shows up in the "attach" picker again.
+  // shows up in the "attach" picker again. `remove` 422s when the
+  // label is already missing; that's fine, just swallow it.
   async unbindFromVm(ownerId: string, volumeSlug: string): Promise<void> {
     const ns = ownerNamespace(ownerId)
     const core = k8sCore()
+    const path = jsonPointerLabel(VOLUME_BOUND_TO_LABEL)
     await core
       .patchNamespacedPersistentVolumeClaim({
         name: volumeSlug,
         namespace: ns,
-        body: {
-          metadata: { labels: { [VOLUME_BOUND_TO_LABEL]: null } },
-        },
+        body: [{ op: "remove", path: `/metadata/labels${path}` }] as unknown as object,
       })
       .catch(() => undefined)
   }
@@ -280,4 +284,10 @@ function parseGi(qty: string): number {
   // Accept "20Gi", "20Gi", "1.5Gi". Rounded to one decimal for UI.
   const m = /^([0-9.]+)Gi$/.exec(qty)
   return m ? Math.round(Number(m[1]) * 10) / 10 : 0
+}
+
+// JSON Pointer encoding for label keys. Slash → ~1, tilde → ~0.
+// e.g. `agent-platform/volume-bound-to` → `/agent-platform~1volume-bound-to`.
+function jsonPointerLabel(label: string): string {
+  return `/${label.replace(/~/g, "~0").replace(/\//g, "~1")}`
 }

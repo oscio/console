@@ -29,7 +29,7 @@ type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
 const CPU = { min: 0.5, max: 8, step: 0.5, recommended: 2 }
 const MEM = { min: 1, max: 16, step: 1, recommended: 4 }
-const VOL = { min: 1, max: 100, step: 0.5, recommended: 1 }
+const VOL = { min: 1, max: 20, step: 1, recommended: 2 }
 
 type Mode = "new" | "attach" | "none"
 
@@ -175,7 +175,7 @@ export function NewVmForm({
             </Select>
 
             {volumeMode === "new" && (
-              <div className="space-y-3 border-l-2 border-muted pl-3">
+              <div className="space-y-3 ">
                 <SliderField
                   id="vm-volume-size"
                   label="Size"
@@ -210,7 +210,7 @@ export function NewVmForm({
             )}
 
             {volumeMode === "attach" && (
-              <div className="space-y-1.5 border-l-2 border-muted pl-3">
+              <div className="space-y-1.5 ">
                 <Label htmlFor="vm-volume-slug" className="text-xs">
                   Free volume
                 </Label>
@@ -231,7 +231,7 @@ export function NewVmForm({
             )}
 
             {volumeMode === "none" && (
-              <p className="text-muted-foreground text-xs border-l-2 border-muted pl-3">
+              <p className="text-muted-foreground text-xs ">
                 The pod's <code>/home/agent</code> lives on the container's
                 ephemeral filesystem; everything is lost on pod restart.
               </p>
