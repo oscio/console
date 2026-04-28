@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common"
@@ -18,9 +19,10 @@ import {
   VmStatus,
 } from "./vms.types"
 
-// DNS-1123 label: lowercase, digits, hyphens; must start/end with alnum;
-// max 63 chars. Used for namespace + StatefulSet name.
-const DNS_1123 = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
+// DNS-1035 label: must start with a letter (Service names enforce this,
+// stricter than DNS-1123). Lowercase letters/digits/hyphens, end alnum,
+// max 63 chars. Used for VM name → StatefulSet, Service, hostname.
+const DNS_1035 = /^[a-z]([-a-z0-9]*[a-z0-9])?$/
 const NS_PREFIX = "resource-vm-"
 
 function sanitizeLabel(value: string): string {
@@ -35,6 +37,28 @@ function ownerNamespace(ownerId: string): string {
   const slug = sanitizeLabel(ownerId)
   if (!slug) throw new BadRequestException("Invalid owner id")
   return `${NS_PREFIX}${slug}`
+}
+
+// @kubernetes/client-node throws ApiException with the K8s 4xx body
+// stringified inside. NestJS' default exception filter turns anything
+// non-HttpException into 500, hiding the actual reason. Surface the
+// K8s message and status (400, 404, 409, 422) so the UI can show it.
+function rethrowK8sError(err: unknown, fallback: string): never {
+  const e = err as { code?: number; statusCode?: number; body?: unknown; message?: string }
+  const code = e.code ?? e.statusCode
+  if (typeof code === "number" && code >= 400 && code < 500) {
+    let msg = fallback
+    if (typeof e.body === "string") {
+      try {
+        const parsed = JSON.parse(e.body) as { message?: string }
+        if (parsed.message) msg = parsed.message
+      } catch {
+        msg = e.body
+      }
+    }
+    throw new HttpException(msg, code)
+  }
+  throw err
 }
 
 @Injectable()
@@ -80,9 +104,9 @@ export class VmsService {
 
   async create(ownerId: string, input: CreateVmInput): Promise<Vm> {
     const name = sanitizeLabel(input.name)
-    if (!DNS_1123.test(name)) {
+    if (!DNS_1035.test(name)) {
       throw new BadRequestException(
-        "name must be a DNS-1123 label (lowercase alnum and hyphens).",
+        "name must start with a letter and contain only lowercase letters, digits, and hyphens.",
       )
     }
     const ns = ownerNamespace(ownerId)
@@ -155,7 +179,7 @@ export class VmsService {
       if (code === 409) {
         throw new ConflictException(`VM "${name}" already exists in ${ns}.`)
       }
-      throw err
+      rethrowK8sError(err, `Failed to create VM "${name}"`)
     }
 
     const vms = await this.listForOwner(ownerId)
@@ -166,7 +190,7 @@ export class VmsService {
 
   async delete(ownerId: string, name: string): Promise<void> {
     const slug = sanitizeLabel(name)
-    if (!DNS_1123.test(slug)) {
+    if (!DNS_1035.test(slug)) {
       throw new BadRequestException("Invalid VM name.")
     }
     const ns = ownerNamespace(ownerId)
@@ -224,19 +248,23 @@ export class VmsService {
         ?? (err as { statusCode?: number }).statusCode
       if (code !== 404) throw err
     }
-    await core.createNamespacedService({
-      namespace: ns,
-      body: {
-        apiVersion: "v1",
-        kind: "Service",
-        metadata: { name, namespace: ns, labels: { [VM_LABEL]: VM_LABEL_VALUE } },
-        spec: {
-          clusterIP: "None",
-          selector: { "agent-platform/vm-name": name },
-          ports: [{ name: "http", port: 8080, targetPort: 8080 }],
+    try {
+      await core.createNamespacedService({
+        namespace: ns,
+        body: {
+          apiVersion: "v1",
+          kind: "Service",
+          metadata: { name, namespace: ns, labels: { [VM_LABEL]: VM_LABEL_VALUE } },
+          spec: {
+            clusterIP: "None",
+            selector: { "agent-platform/vm-name": name },
+            ports: [{ name: "http", port: 8080, targetPort: 8080 }],
+          },
         },
-      },
-    })
+      })
+    } catch (err) {
+      rethrowK8sError(err, `Failed to create headless Service for VM "${name}"`)
+    }
   }
 
   private vmLabels(

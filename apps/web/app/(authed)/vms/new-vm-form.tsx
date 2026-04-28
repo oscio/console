@@ -56,7 +56,7 @@ export function NewVmForm({ action }: { action: Action }) {
           <input
             name="name"
             required
-            pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?"
+            pattern="[a-z]([-a-z0-9]*[a-z0-9])?"
             placeholder="my-vm"
             className="bg-background w-full rounded-md border px-2 py-1.5 text-sm"
           />
