@@ -6,6 +6,7 @@ import {
   Database,
   Gauge,
   IdentificationCard,
+  Network,
   Robot,
   Stack,
   GearSix,
@@ -39,6 +40,7 @@ const PRIMARY: NavItem[] = [
 const SERVICES: NavItem[] = [
   { href: "/vms", label: "VMs", icon: Stack },
   { href: "/volumes", label: "Volumes", icon: Database },
+  { href: "/loadbalancers", label: "Load Balancers", icon: Network },
   { href: "/agents", label: "Agents", icon: Robot },
 ]
 

@@ -57,6 +57,18 @@
       }
     },
     {
+      "type": "loadbalancer",
+      "relations": {
+        "owner":      { "this": {} },
+        "can_access": { "computedUserset": { "relation": "owner" } }
+      },
+      "metadata": {
+        "relations": {
+          "owner": { "directly_related_user_types": [ { "type": "user" } ] }
+        }
+      }
+    },
+    {
       "type": "agent",
       "relations": {
         "owner":      { "this": {} },

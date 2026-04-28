@@ -199,6 +199,31 @@ export class OpenFgaService implements OnModuleInit {
     return this.check(userKey(userId), "can_access", volumeKey(slug))
   }
 
+  // ---- LoadBalancer ownership --------------------------------------------
+
+  async grantLoadBalancerOwner(slug: string, userId: string): Promise<void> {
+    await this.write([
+      { user: userKey(userId), relation: "owner", object: lbKey(slug) },
+    ])
+  }
+
+  async revokeLoadBalancerOwner(slug: string, userId: string): Promise<void> {
+    await this.deleteTuples([
+      { user: userKey(userId), relation: "owner", object: lbKey(slug) },
+    ])
+  }
+
+  async listLoadBalancerOwners(slug: string): Promise<string[]> {
+    const subjects = await this.listSubjects("owner", lbKey(slug))
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async canAccessLoadBalancer(userId: string, slug: string): Promise<boolean> {
+    return this.check(userKey(userId), "can_access", lbKey(slug))
+  }
+
   // -------------------------------------------------------------------------
 
   private async post(path: string, body: unknown): Promise<any> {
@@ -229,6 +254,10 @@ export function agentKey(slug: string): string {
 
 export function volumeKey(slug: string): string {
   return `volume:${slug}`
+}
+
+export function lbKey(slug: string): string {
+  return `loadbalancer:${slug}`
 }
 
 async function readDevEnvFile(path: string): Promise<Record<string, string>> {

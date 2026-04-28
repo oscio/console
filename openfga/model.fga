@@ -32,6 +32,13 @@ type volume
     define owner: [user]
     define can_access: owner
 
+# LoadBalancer ownership — guards `/loadbalancers` API. Each LB
+# exposes one VM port at `<slug>.lb.<domain>`.
+type loadbalancer
+  relations
+    define owner: [user]
+    define can_access: owner
+
 # Agent ownership for the per-agent auth gate. Same shape as `vm`;
 # guards https://<agent-slug>.agents.<domain>.
 type agent

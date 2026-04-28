@@ -307,3 +307,65 @@ export async function deleteVolume(
     throw new Error(`volumes delete failed: ${res.status} ${text}`)
   }
 }
+
+export type LoadBalancerStatus = "Ready" | "Pending" | "Unknown"
+
+export type LoadBalancer = {
+  id: string
+  slug: string
+  name: string
+  owner: string
+  namespace: string
+  vmSlug: string
+  port: number
+  hostname: string
+  url: string
+  status: LoadBalancerStatus
+  createdAt: string
+}
+
+export async function fetchLoadBalancers(
+  cookieHeader: string,
+): Promise<LoadBalancer[] | null> {
+  const res = await fetch(`${API_URL}/loadbalancers`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) throw new Error(`loadbalancers list failed: ${res.status}`)
+  return (await res.json()) as LoadBalancer[]
+}
+
+export async function createLoadBalancer(
+  cookieHeader: string,
+  input: { name: string; vmSlug: string; port: number },
+): Promise<LoadBalancer> {
+  const res = await fetch(`${API_URL}/loadbalancers`, {
+    method: "POST",
+    headers: {
+      cookie: cookieHeader,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`loadbalancers create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as LoadBalancer
+}
+
+export async function deleteLoadBalancer(
+  cookieHeader: string,
+  slug: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/loadbalancers/${encodeURIComponent(slug)}`,
+    { method: "DELETE", headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`loadbalancers delete failed: ${res.status} ${text}`)
+  }
+}
