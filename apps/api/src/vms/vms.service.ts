@@ -74,32 +74,25 @@ export class VmsService {
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
+  // oauth2-proxy public URL. Launch links route through
+  // /oauth2/start?rd=<vm-url> so users get silent SSO via Keycloak
+  // before landing on the VM hostname (forwardAuth on the VM URL
+  // would otherwise return a blank 401 to a browser).
+  private readonly oauthProxyUrl = process.env.OAUTH_PROXY_URL ?? ""
   // Gateway API parent ref for per-VM HTTPRoutes. Defaults match the
   // dev cluster's `platform-gateway` in `platform-traefik`.
   private readonly gatewayName =
     process.env.VM_GATEWAY_NAME ?? "platform-gateway"
   private readonly gatewayNamespace =
     process.env.VM_GATEWAY_NAMESPACE ?? "platform-traefik"
-  // ForwardAuth chain: errors-redirect (401 → /oauth2/start) →
-  // oauth2-proxy /oauth2/auth (session) → console-api /vms/auth
-  // (FGA ownership). Traefik resolves Middleware refs only within
-  // the HTTPRoute's namespace, so we clone all three into each VM
-  // namespace. Empty oauth URL = no auth gate at all.
+  // ForwardAuth chain: oauth2-proxy /oauth2/auth (session) →
+  // console-api /vms/auth (FGA ownership). Traefik resolves
+  // Middleware refs only within the HTTPRoute's namespace, so the
+  // api clones tiny Middlewares into each VM namespace. Empty oauth
+  // URL = no auth gate at all.
   private readonly authForwardUrl = process.env.VM_AUTH_FORWARD_URL ?? ""
   private readonly authOwnershipUrl =
     process.env.VM_AUTH_OWNERSHIP_URL ?? ""
-  // oauth2-proxy Service for the errors-redirect Middleware. When
-  // forwardAuth returns 401, Traefik fetches /oauth2/start?rd=<url>
-  // from this Service instead of returning 401 — the response is a
-  // 302 to Keycloak, so already-logged-in users get a silent SSO.
-  private readonly authOauthSvcName =
-    process.env.VM_AUTH_OAUTH_SVC_NAME ?? ""
-  private readonly authOauthSvcNamespace =
-    process.env.VM_AUTH_OAUTH_SVC_NAMESPACE ?? ""
-  private readonly authOauthSvcPort = Number(
-    process.env.VM_AUTH_OAUTH_SVC_PORT ?? "80",
-  )
-  private readonly authErrorsMiddleware = "vm-auth-errors"
   private readonly authOauthMiddleware = "vm-auth-oauth"
   private readonly authFgaMiddleware = "vm-auth-fga"
 
@@ -151,14 +144,12 @@ export class VmsService {
 
     await this.ensureNamespace(ns, ownerId)
 
-    // Per-namespace Middlewares cloned into the VM ns. Order matters:
-    //  1. errors-redirect → catches 401 from forwardAuth and replaces
-    //     with a 302 to /oauth2/start (silent SSO when already logged in)
-    //  2. oauth-auth → forwardAuth → oauth2-proxy /oauth2/auth (session)
-    //  3. fga → forwardAuth → console-api /vms/auth (ownership)
-    if (this.authForwardUrl && this.authOauthSvcName) {
-      await this.ensureErrorsMiddleware(ns)
-    }
+    // Per-namespace Middlewares cloned into the VM ns:
+    //  1. oauth-auth → forwardAuth → oauth2-proxy /oauth2/auth (session)
+    //  2. fga → forwardAuth → console-api /vms/auth (ownership)
+    // (Direct-typed VM URLs without a session still get a blank 401 —
+    // launch links from the console UI route through /oauth2/start to
+    // give silent SSO instead.)
     if (this.authForwardUrl) {
       await this.ensureAuthMiddleware(
         ns,
@@ -381,18 +372,13 @@ export class VmsService {
     const custom = k8sCustom()
     const name = `${slug}-${svc}`
     const hostname = `${slug}-${svc}.${this.vmDomain}`
-    // ExtensionRef chain. errors-redirect goes first (outermost) so
-    // it can catch 401 from the forwardAuth middlewares and replace
-    // with a 302 to /oauth2/start. Then oauth (sets X-Auth-Request-*
-    // headers), then fga (consumes those headers).
+    // ExtensionRef chain: oauth (sets X-Auth-Request-* headers) →
+    // fga (consumes those headers).
     const filterFor = (name: string) => ({
       type: "ExtensionRef",
       extensionRef: { group: "traefik.io", kind: "Middleware", name },
     })
     const authFilters: Array<ReturnType<typeof filterFor>> = []
-    if (this.authForwardUrl && this.authOauthSvcName) {
-      authFilters.push(filterFor(this.authErrorsMiddleware))
-    }
     if (this.authForwardUrl) authFilters.push(filterFor(this.authOauthMiddleware))
     if (this.authOwnershipUrl) authFilters.push(filterFor(this.authFgaMiddleware))
     const body = {
@@ -437,49 +423,6 @@ export class VmsService {
         ?? (err as { statusCode?: number }).statusCode
       if (code === 409) return // already exists, fine
       rethrowK8sError(err, `Failed to create HTTPRoute "${name}"`)
-    }
-  }
-
-  // Errors middleware: catches 401 from the chain and replaces the
-  // response with whatever oauth2-proxy returns at /oauth2/start —
-  // a 302 to Keycloak. Cross-namespace Service ref (oauth2-proxy
-  // lives in its own ns); Traefik supports `namespace` on the
-  // service field.
-  private async ensureErrorsMiddleware(ns: string): Promise<void> {
-    const custom = k8sCustom()
-    const body = {
-      apiVersion: "traefik.io/v1alpha1",
-      kind: "Middleware",
-      metadata: {
-        name: this.authErrorsMiddleware,
-        namespace: ns,
-        labels: { [VM_LABEL]: VM_LABEL_VALUE },
-      },
-      spec: {
-        errors: {
-          status: ["401"],
-          service: {
-            name: this.authOauthSvcName,
-            namespace: this.authOauthSvcNamespace,
-            port: this.authOauthSvcPort,
-          },
-          query: "/oauth2/start?rd={url}",
-        },
-      },
-    }
-    try {
-      await custom.createNamespacedCustomObject({
-        group: "traefik.io",
-        version: "v1alpha1",
-        namespace: ns,
-        plural: "middlewares",
-        body,
-      })
-    } catch (err: unknown) {
-      const code = (err as { code?: number; statusCode?: number }).code
-        ?? (err as { statusCode?: number }).statusCode
-      if (code === 409) return
-      rethrowK8sError(err, `Failed to create errors Middleware in ${ns}`)
     }
   }
 
@@ -616,6 +559,14 @@ export class VmsService {
     }
   }
 
+  // Wraps a VM URL in oauth2-proxy /oauth2/start?rd=… so the browser
+  // gets a redirect chain: Keycloak (silent) → oauth2-proxy callback
+  // → VM URL. When OAUTH_PROXY_URL is unset, returns the URL unchanged.
+  private launchUrl(target: string): string {
+    if (!this.oauthProxyUrl) return target
+    return `${this.oauthProxyUrl}/oauth2/start?rd=${encodeURIComponent(target)}`
+  }
+
   private toVm(sts: {
     metadata?: {
       name?: string
@@ -657,15 +608,18 @@ export class VmsService {
       status,
       hostname,
       createdAt,
-      // Per-host URLs under the `*.vm.<domain>` wildcard listener. Each
-      // upstream serves at `/`, so WebSockets and absolute asset URLs
-      // work as-is. Browsers need the platform root CA trusted once
+      // Per-host URLs under the `*.vm.<domain>` wildcard listener.
+      // Routed through oauth2-proxy /oauth2/start so the browser does
+      // a silent OIDC roundtrip first (user already has a Keycloak
+      // session from console login), then lands on the VM hostname
+      // with a valid `_oauth2_proxy` cookie on `.<domain>`.
+      // Browsers need the platform root CA trusted once
       // (sudo security add-trusted-cert ...).
-      xtermUrl: `https://${slug}-term.${this.vmDomain}`,
-      codeUrl: `https://${slug}-code.${this.vmDomain}`,
+      xtermUrl: this.launchUrl(`https://${slug}-term.${this.vmDomain}`),
+      codeUrl: this.launchUrl(`https://${slug}-code.${this.vmDomain}`),
       vncUrl:
         imageType === "desktop"
-          ? `https://${slug}-vnc.${this.vmDomain}`
+          ? this.launchUrl(`https://${slug}-vnc.${this.vmDomain}`)
           : null,
     }
   }
