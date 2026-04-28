@@ -12,7 +12,13 @@ on:
   push:
     branches: [main]
     paths:
-      - "services/console/**"
+      - "apps/**"
+      - "packages/**"
+      - "Dockerfile.*"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
       - ".forgejo/workflows/**"
   workflow_dispatch: {}
 
@@ -25,7 +31,7 @@ jobs:
     runs-on: docker
     defaults:
       run:
-        working-directory: services/console
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
       - name: Install docker CLI
@@ -53,7 +59,7 @@ jobs:
     runs-on: docker
     defaults:
       run:
-        working-directory: services/console
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
       - name: Install docker CLI

@@ -3,9 +3,10 @@ import { AppController } from "./app.controller"
 import { AccountsModule } from "./accounts/accounts.module"
 import { OpenFgaModule } from "./openfga/openfga.module"
 import { RoleBindingsModule } from "./role-bindings/role-bindings.module"
+import { VmsModule } from "./vms/vms.module"
 
 @Module({
-  imports: [OpenFgaModule, AccountsModule, RoleBindingsModule],
+  imports: [OpenFgaModule, AccountsModule, RoleBindingsModule, VmsModule],
   controllers: [AppController],
 })
 export class AppModule {}

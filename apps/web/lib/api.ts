@@ -85,3 +85,68 @@ export async function setConsoleAdminRole(
     )
   }
 }
+
+export type VmImageType = "base" | "desktop"
+export type VmAgentType = "hermes" | "none"
+export type VmStatus = "Pending" | "Running" | "Failed" | "Unknown"
+
+export type Vm = {
+  id: string
+  name: string
+  owner: string
+  namespace: string
+  imageType: VmImageType
+  agentType: VmAgentType
+  status: VmStatus
+  hostname: string
+  createdAt: string
+}
+
+export async function fetchVms(cookieHeader: string): Promise<Vm[] | null> {
+  const res = await fetch(`${API_URL}/vms`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) throw new Error(`vms list failed: ${res.status}`)
+  return (await res.json()) as Vm[]
+}
+
+export async function createVm(
+  cookieHeader: string,
+  input: {
+    name: string
+    imageType: VmImageType
+    agentType: VmAgentType
+    storageSize?: string
+  },
+): Promise<Vm> {
+  const res = await fetch(`${API_URL}/vms`, {
+    method: "POST",
+    headers: {
+      cookie: cookieHeader,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`vms create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Vm
+}
+
+export async function deleteVm(
+  cookieHeader: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/vms/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`vms delete failed: ${res.status} ${text}`)
+  }
+}
