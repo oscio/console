@@ -1,0 +1,315 @@
+# =====================================================================
+# Local dev. Bring everything up with:
+#
+#     docker compose --profile dev up
+#
+# All dev services live under the `dev` profile so a bare `docker
+# compose up` (e.g. CI) is a no-op. Source is bind-mounted from the host
+# so file edits propagate live. node_modules paths are shielded by
+# anonymous volumes so the host's macOS-native binaries don't bleed into
+# the linux containers.
+# =====================================================================
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile.dev
+  env_file: .env
+  profiles: ["dev"]
+  volumes:
+    - .:/app
+    # Anonymous volumes hide the bind-mount at these paths so each
+    # container keeps its own (linux/arch) node_modules from the image.
+    - /app/node_modules
+    - /app/apps/web/node_modules
+    - /app/apps/api/node_modules
+    - /app/packages/auth/node_modules
+    - /app/packages/ui/node_modules
+    - /app/packages/eslint-config/node_modules
+    - /app/packages/typescript-config/node_modules
+  # Bind-mount file events on macOS sometimes don't propagate to chokidar;
+  # uncomment if next dev / nest --watch / tsup --watch stop reacting.
+  # environment:
+  #   CHOKIDAR_USEPOLLING: "true"
+  #   WATCHPACK_POLLING: "true"
+  extra_hosts:
+    # Browser and containers must see the same OIDC issuer. The browser
+    # resolves *.localhost to loopback; containers use the host-gateway
+    # address and reach the mock IdP through its published port.
+    - "mock-idp.localhost:host-gateway"
+
+services:
+  mock-idp:
+    profiles: ["dev"]
+    image: node:20-alpine
+    container_name: console-mock-idp
+    working_dir: /app
+    command: node apps/mock-idp/server.mjs
+    environment:
+      PORT: "4010"
+      MOCK_IDP_ISSUER: http://mock-idp.localhost:4010
+      MOCK_IDP_REDIRECT_URIS: http://localhost:3000/api/auth/oauth2/callback/keycloak
+    ports:
+      - "4010:4010"
+    volumes:
+      - .:/app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4010/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    profiles: ["dev"]
+    # Pinned to match infra/modules/postgres (var.image_tag default).
+    image: postgres:16.4-alpine
+    container_name: console-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: console
+      POSTGRES_PASSWORD: console
+      POSTGRES_DB: console
+    ports:
+      - "5433:5432"
+    volumes:
+      - console-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U console"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # tsup --watch on packages/auth so the dist consumed by web (ESM) and
+  # api (CJS) updates whenever src/ changes. No port — internal-only.
+  # Also the host for `docker compose exec auth pnpm auth:migrate`.
+  auth:
+    <<: *app-base
+    container_name: console-auth
+    working_dir: /app/packages/auth
+    command: pnpm dev
+    environment:
+      DATABASE_URL: postgres://console:console@postgres:5432/console
+      KEYCLOAK_ISSUER_URL: http://mock-idp.localhost:4010
+      KEYCLOAK_CLIENT_ID: console
+      KEYCLOAK_CLIENT_SECRET: mock-secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-idp:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------
+  # OpenFGA — Zanzibar-style authz engine. Mirrors infra/modules/openfga:
+  # shared Postgres backend, a one-shot db-init + migrate, the server,
+  # then a bootstrap one-shot that creates a store + writes the authz
+  # model and persists {store_id, auth_model_id, api_url} into a shared
+  # volume that api/web mount read-only at /var/run/openfga.
+  # ---------------------------------------------------------------------
+
+  # Idempotently CREATE ROLE / DATABASE for openfga in the existing
+  # console-postgres. Mirrors infra db-create Job (IF NOT EXISTS).
+  openfga-db-init:
+    profiles: ["dev"]
+    image: postgres:16.4-alpine
+    container_name: console-openfga-db-init
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: console
+      PGPASSWORD: console
+      PGDATABASE: postgres
+    command: >
+      sh -c "
+      set -eu;
+      psql -v ON_ERROR_STOP=1 -tAc \"SELECT 1 FROM pg_roles WHERE rolname='openfga'\" | grep -q 1 ||
+        psql -v ON_ERROR_STOP=1 -c \"CREATE ROLE openfga LOGIN PASSWORD 'openfga'\";
+      psql -v ON_ERROR_STOP=1 -tAc \"SELECT 1 FROM pg_database WHERE datname='openfga'\" | grep -q 1 ||
+        psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE openfga OWNER openfga\";
+      psql -v ON_ERROR_STOP=1 -c \"GRANT ALL PRIVILEGES ON DATABASE openfga TO openfga\";
+      echo '[openfga-db-init] done.';
+      "
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # `openfga migrate` — schema bootstrap on the openfga db. Idempotent.
+  openfga-migrate:
+    profiles: ["dev"]
+    image: openfga/openfga:v1.14.2
+    container_name: console-openfga-migrate
+    restart: "no"
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      openfga-db-init:
+        condition: service_completed_successfully
+
+  # OpenFGA server. HTTP 8080, gRPC 8081, Playground on container :3000
+  # (remapped to host :3003 to avoid colliding with console-web).
+  openfga:
+    profiles: ["dev"]
+    image: openfga/openfga:v1.14.2
+    container_name: console-openfga
+    restart: unless-stopped
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga:openfga@postgres:5432/openfga?sslmode=disable
+      OPENFGA_HTTP_ADDR: 0.0.0.0:8080
+      OPENFGA_GRPC_ADDR: 0.0.0.0:8081
+      OPENFGA_PLAYGROUND_ENABLED: "true"
+      OPENFGA_LOG_LEVEL: info
+      OPENFGA_LOG_FORMAT: json
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "3003:3000"
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+
+  # One-shot: create the store, POST the authz model, write
+  # OPENFGA_{API_URL,STORE_ID,AUTH_MODEL_ID} into /state/openfga.env on
+  # the shared `openfga-state` volume. Skips if already populated.
+  openfga-bootstrap:
+    profiles: ["dev"]
+    image: alpine:3.20
+    container_name: console-openfga-bootstrap
+    restart: "no"
+    environment:
+      API_URL: http://openfga:8080
+      STORE_NAME: platform-projects
+    volumes:
+      - openfga-state:/state
+      - ./openfga/model.json:/cfg/model.json:ro
+    command: >
+      sh -c '
+      set -eu;
+      apk add --no-cache curl >/dev/null;
+      ENV_FILE=/state/openfga.env;
+      if [ -s "$$ENV_FILE" ] && grep -q "^OPENFGA_STORE_ID=." "$$ENV_FILE"; then
+        echo "[openfga-bootstrap] $$ENV_FILE already populated — skipping.";
+        cat "$$ENV_FILE";
+        exit 0;
+      fi;
+      echo "[openfga-bootstrap] waiting for $$API_URL/healthz ...";
+      for i in $$(seq 1 60); do
+        if curl -fsS "$$API_URL/healthz" >/dev/null 2>&1; then
+          echo "[openfga-bootstrap] API responding."; break;
+        fi;
+        echo "  ...($$i/60) not ready yet"; sleep 2;
+      done;
+      echo "[openfga-bootstrap] creating store \"$$STORE_NAME\"...";
+      store_out=$$(curl -fsS -X POST "$$API_URL/stores" -H "Content-Type: application/json" -d "{\"name\":\"$$STORE_NAME\"}");
+      store_id=$$(echo "$$store_out" | sed -n "s/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p");
+      [ -n "$$store_id" ] || { echo "[openfga-bootstrap] ERROR: failed to parse store_id from: $$store_out" >&2; exit 1; };
+      echo "[openfga-bootstrap] store_id=$$store_id";
+      echo "[openfga-bootstrap] writing authorization model...";
+      model_out=$$(curl -fsS -X POST "$$API_URL/stores/$$store_id/authorization-models" -H "Content-Type: application/json" --data-binary @/cfg/model.json);
+      model_id=$$(echo "$$model_out" | sed -n "s/.*\"authorization_model_id\":\"\\([^\"]*\\)\".*/\\1/p");
+      [ -n "$$model_id" ] || { echo "[openfga-bootstrap] ERROR: failed to parse auth_model_id from: $$model_out" >&2; exit 1; };
+      {
+        echo "OPENFGA_API_URL=$$API_URL";
+        echo "OPENFGA_STORE_ID=$$store_id";
+        echo "OPENFGA_AUTH_MODEL_ID=$$model_id";
+        echo "OPENFGA_STORE_NAME=$$STORE_NAME";
+      } > "$$ENV_FILE";
+      echo "[openfga-bootstrap] wrote $$ENV_FILE:";
+      cat "$$ENV_FILE";
+      '
+    depends_on:
+      openfga:
+        condition: service_started
+
+  api:
+    <<: *app-base
+    container_name: console-api
+    working_dir: /app/apps/api
+    command: pnpm dev
+    environment:
+      # The shared platform-infra Postgres lives on `postgres:5432` from
+      # inside the compose network; override the host-side .env value.
+      DATABASE_URL: postgres://console:console@postgres:5432/console
+      KEYCLOAK_ISSUER_URL: http://mock-idp.localhost:4010
+      KEYCLOAK_CLIENT_ID: console
+      KEYCLOAK_CLIENT_SECRET: mock-secret
+      WEB_URL: http://localhost:3000
+      PORT: "3001"
+      # OpenFGA: API URL is static; store/model ids are written into
+      # /var/run/openfga/openfga.env by openfga-bootstrap. Read at
+      # startup once the consumer wires it up.
+      OPENFGA_API_URL: http://openfga:8080
+    # Re-declares the base bind-mounts because YAML merge (`<<: *app-base`)
+    # *replaces* the `volumes` key rather than merging it. Keep in sync with
+    # x-app-base above when adding/removing workspace packages.
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/api/node_modules
+      - /app/packages/auth/node_modules
+      - /app/packages/ui/node_modules
+      - /app/packages/eslint-config/node_modules
+      - /app/packages/typescript-config/node_modules
+      - openfga-state:/var/run/openfga:ro
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-idp:
+        condition: service_healthy
+      auth:
+        condition: service_started
+      openfga-bootstrap:
+        condition: service_completed_successfully
+
+  web:
+    <<: *app-base
+    container_name: console-web
+    working_dir: /app/apps/web
+    command: pnpm dev
+    environment:
+      DATABASE_URL: postgres://console:console@postgres:5432/console
+      KEYCLOAK_ISSUER_URL: http://mock-idp.localhost:4010
+      KEYCLOAK_CLIENT_ID: console
+      KEYCLOAK_CLIENT_SECRET: mock-secret
+      # Browser hits the api on the published host port; server-side
+      # fetch from web → api uses the compose-network DNS name.
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      API_URL_INTERNAL: http://api:3001
+      BETTER_AUTH_URL: http://localhost:3000
+      # Override PORT (which `.env` sets to 3001 for the api) so Next.js
+      # binds to 3000 inside the container.
+      PORT: "3000"
+      OPENFGA_API_URL: http://openfga:8080
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/api/node_modules
+      - /app/packages/auth/node_modules
+      - /app/packages/ui/node_modules
+      - /app/packages/eslint-config/node_modules
+      - /app/packages/typescript-config/node_modules
+      - openfga-state:/var/run/openfga:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-idp:
+        condition: service_healthy
+      auth:
+        condition: service_started
+      api:
+        condition: service_started
+      openfga-bootstrap:
+        condition: service_completed_successfully
+
+volumes:
+  console-postgres:
+  openfga-state:

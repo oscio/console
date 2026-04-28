@@ -1,0 +1,44 @@
+{
+  "name": "@workspace/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "require": "./dist/env.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "auth:generate": "pnpm dlx @better-auth/cli@latest generate --config src/index.ts",
+    "auth:migrate": "pnpm dlx @better-auth/cli@latest migrate --config src/index.ts -y"
+  },
+  "dependencies": {
+    "better-auth": "^1.4.6",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "@types/pg": "^8.11.10",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9.39.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.9.3"
+  }
+}

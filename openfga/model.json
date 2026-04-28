@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    { "type": "user" },
+    {
+      "type": "platform",
+      "relations": {
+        "console_admin": { "this": {} }
+      },
+      "metadata": {
+        "relations": {
+          "console_admin": { "directly_related_user_types": [{ "type": "user" }] }
+        }
+      }
+    },
+    {
+      "type": "project",
+      "relations": {
+        "owner":      { "this": {} },
+        "editor":     { "union": { "child": [ { "this": {} }, { "computedUserset": { "relation": "owner" } } ] } },
+        "viewer":     { "union": { "child": [ { "this": {} }, { "computedUserset": { "relation": "editor" } } ] } },
+        "can_view":   { "computedUserset": { "relation": "viewer" } },
+        "can_edit":   { "computedUserset": { "relation": "editor" } },
+        "can_admin":  { "computedUserset": { "relation": "owner" } },
+        "can_delete": { "computedUserset": { "relation": "owner" } }
+      },
+      "metadata": {
+        "relations": {
+          "owner":  { "directly_related_user_types": [ { "type": "user" } ] },
+          "editor": { "directly_related_user_types": [ { "type": "user" } ] },
+          "viewer": { "directly_related_user_types": [ { "type": "user" } ] }
+        }
+      }
+    }
+  ]
+}

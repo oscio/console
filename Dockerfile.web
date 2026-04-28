@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1.7
+# ---------------------------------------------------------------------------
+# console-web — Next.js 16 (App Router) production image.
+#
+# Multi-stage build:
+#   1. deps    — install full pnpm workspace deps from lockfile
+#   2. build   — build @workspace/auth (consumed by web), then `next build`
+#                with output: 'standalone' so the runtime image only needs
+#                the traced files + node_modules subset Next.js emits.
+#   3. runtime — slim node:22-alpine with the standalone bundle.
+#
+# Build context is `services/console`. The Forgejo workflow runs
+# `docker build -f Dockerfile.web .` from that directory.
+# ---------------------------------------------------------------------------
+
+ARG NODE_VERSION=22-alpine
+
+FROM node:${NODE_VERSION} AS base
+RUN corepack enable
+WORKDIR /repo
+
+# ---- deps -----------------------------------------------------------------
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/web/package.json apps/web/
+COPY apps/api/package.json apps/api/
+COPY packages/auth/package.json packages/auth/
+COPY packages/ui/package.json packages/ui/
+COPY packages/eslint-config/package.json packages/eslint-config/
+COPY packages/typescript-config/package.json packages/typescript-config/
+RUN pnpm install --frozen-lockfile
+
+# ---- build ----------------------------------------------------------------
+FROM deps AS build
+COPY . .
+# @workspace/auth is consumed by web at build + run time, build it first.
+RUN pnpm --filter @workspace/auth build
+RUN pnpm --filter web build
+
+# ---- runtime --------------------------------------------------------------
+# Next.js standalone output already includes a minimal node_modules; the
+# runtime image only needs node + that bundle + the static assets that
+# `next build` emits *outside* standalone (.next/static and public/).
+FROM node:${NODE_VERSION} AS runtime
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+WORKDIR /app
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=build --chown=app:app /repo/apps/web/.next/standalone ./
+COPY --from=build --chown=app:app /repo/apps/web/.next/static ./apps/web/.next/static
+USER app
+EXPOSE 3000
+# Standalone bundles its server entrypoint at <outputFileTracingRoot>/apps/web/server.js
+CMD ["node", "apps/web/server.js"]

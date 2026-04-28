@@ -1,0 +1,78 @@
+name: console-build-and-push
+
+# Builds the console-web and console-api images on push and pushes both to
+# the in-cluster Harbor. Mirrors the agent-sandbox build workflow:
+#   - runs on the `docker` runner pool (forgejo-runner pod with DinD sidecar)
+#   - DOCKER_HOST is set by the runner to tcp://host.docker.internal:2375
+#   - DinD trusts cr.<domain> as an insecure registry in selfsigned dev mode
+# Tags pushed: <sha> and `latest`. The Helm/Terraform module pins to the
+# digest or sha tag in production; `latest` is for ad-hoc redeploys via Keel.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/console/**"
+      - ".forgejo/workflows/**"
+  workflow_dispatch: {}
+
+env:
+  HARBOR: cr.dev.openschema.io
+  PROJECT: agent-platform
+
+jobs:
+  web:
+    runs-on: docker
+    defaults:
+      run:
+        working-directory: services/console
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install docker CLI
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends docker.io ca-certificates
+        working-directory: .
+      - name: Login to Harbor
+        env:
+          HU: ${{ secrets.HARBOR_USER }}
+          HT: ${{ secrets.HARBOR_TOKEN }}
+        run: echo "$HT" | docker login "$HARBOR" -u "$HU" --password-stdin
+        working-directory: .
+      - name: Build and push console-web
+        env:
+          IMAGE: ${{ env.HARBOR }}/${{ env.PROJECT }}/console-web
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          docker build -t "$IMAGE:$SHA" -t "$IMAGE:latest" -f Dockerfile.web .
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"
+
+  api:
+    runs-on: docker
+    defaults:
+      run:
+        working-directory: services/console
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install docker CLI
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends docker.io ca-certificates
+        working-directory: .
+      - name: Login to Harbor
+        env:
+          HU: ${{ secrets.HARBOR_USER }}
+          HT: ${{ secrets.HARBOR_TOKEN }}
+        run: echo "$HT" | docker login "$HARBOR" -u "$HU" --password-stdin
+        working-directory: .
+      - name: Build and push console-api
+        env:
+          IMAGE: ${{ env.HARBOR }}/${{ env.PROJECT }}/console-api
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          docker build -t "$IMAGE:$SHA" -t "$IMAGE:latest" -f Dockerfile.api .
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"

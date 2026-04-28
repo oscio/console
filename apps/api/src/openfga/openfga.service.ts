@@ -1,0 +1,153 @@
+import { promises as fs } from "node:fs"
+import { Injectable, Logger, OnModuleInit } from "@nestjs/common"
+
+// Single object that platform-level role tuples hang off. The OpenFGA
+// model has `type platform { relations: console_admin: [user] }` — there
+// is no per-tenant scoping yet, so every check uses `platform:default`.
+export const PLATFORM_OBJECT = "platform:default"
+
+// Console-admin is the in-app role that platform-admins (Keycloak group,
+// not an FGA relation) can grant/revoke. Console-admins themselves cannot
+// manage roles. Underscore (not hyphen) because OpenFGA disallows hyphens
+// in relation identifiers.
+export const CONSOLE_ADMIN_RELATION = "console_admin"
+
+export type TupleKey = { user: string; relation: string; object: string }
+
+@Injectable()
+export class OpenFgaService implements OnModuleInit {
+  private readonly log = new Logger(OpenFgaService.name)
+  private apiUrl!: string
+  private storeId!: string
+
+  async onModuleInit() {
+    // Prefer real env (k8s Secret-injected); fall back to the file the
+    // openfga-bootstrap container drops on the shared dev volume.
+    const fileEnv = await readDevEnvFile("/var/run/openfga/openfga.env")
+
+    const apiUrl = process.env.OPENFGA_API_URL ?? fileEnv.OPENFGA_API_URL
+    const storeId = process.env.OPENFGA_STORE_ID ?? fileEnv.OPENFGA_STORE_ID
+
+    if (!apiUrl || !storeId) {
+      throw new Error(
+        "OpenFGA not configured: missing OPENFGA_API_URL or OPENFGA_STORE_ID",
+      )
+    }
+
+    this.apiUrl = apiUrl
+    this.storeId = storeId
+    this.log.log(`OpenFGA configured: ${apiUrl} store=${storeId}`)
+  }
+
+  async check(user: string, relation: string, object: string): Promise<boolean> {
+    const res = await this.post(`/stores/${this.storeId}/check`, {
+      tuple_key: { user, relation, object },
+    })
+    return Boolean(res.allowed)
+  }
+
+  async write(tuples: TupleKey[]): Promise<void> {
+    await this.post(`/stores/${this.storeId}/write`, {
+      writes: { tuple_keys: tuples },
+    })
+  }
+
+  async deleteTuples(tuples: TupleKey[]): Promise<void> {
+    await this.post(`/stores/${this.storeId}/write`, {
+      deletes: { tuple_keys: tuples },
+    })
+  }
+
+  // List user-shaped subjects with the given relation to the given object.
+  async listSubjects(relation: string, object: string): Promise<string[]> {
+    const res = await this.post(`/stores/${this.storeId}/read`, {
+      tuple_key: { relation, object },
+    })
+    const tuples = (res.tuples ?? []) as Array<{ key: TupleKey }>
+    return tuples.map((t) => t.key.user)
+  }
+
+  // ---- Console-admin convenience -----------------------------------------
+  // Note: there is intentionally no platform-admin equivalent. Platform-admin
+  // is sourced from the Keycloak `platform-admin` group claim; it never
+  // becomes a tuple, so it cannot be granted or revoked via this service.
+
+  async isConsoleAdmin(userId: string): Promise<boolean> {
+    return this.check(userKey(userId), CONSOLE_ADMIN_RELATION, PLATFORM_OBJECT)
+  }
+
+  async listConsoleAdmins(): Promise<string[]> {
+    const subjects = await this.listSubjects(
+      CONSOLE_ADMIN_RELATION,
+      PLATFORM_OBJECT,
+    )
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async grantConsoleAdmin(userId: string): Promise<void> {
+    await this.write([
+      {
+        user: userKey(userId),
+        relation: CONSOLE_ADMIN_RELATION,
+        object: PLATFORM_OBJECT,
+      },
+    ])
+  }
+
+  async revokeConsoleAdmin(userId: string): Promise<void> {
+    await this.deleteTuples([
+      {
+        user: userKey(userId),
+        relation: CONSOLE_ADMIN_RELATION,
+        object: PLATFORM_OBJECT,
+      },
+    ])
+  }
+
+  // Best-effort tuple cleanup when a user is deleted. Today only the
+  // console_admin tuple — extend as new types (project, vm, ...) gain
+  // user-shaped relations.
+  async cleanupUserTuples(userId: string): Promise<void> {
+    if (await this.isConsoleAdmin(userId)) {
+      await this.revokeConsoleAdmin(userId)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+
+  private async post(path: string, body: unknown): Promise<any> {
+    const res = await fetch(`${this.apiUrl}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`OpenFGA ${path} -> ${res.status}: ${text}`)
+    }
+    return res.json()
+  }
+}
+
+export function userKey(userId: string): string {
+  return `user:${userId}`
+}
+
+async function readDevEnvFile(path: string): Promise<Record<string, string>> {
+  try {
+    const text = await fs.readFile(path, "utf8")
+    const out: Record<string, string> = {}
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim()
+      if (!line || line.startsWith("#")) continue
+      const eq = line.indexOf("=")
+      if (eq === -1) continue
+      out[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
+    }
+    return out
+  } catch {
+    return {}
+  }
+}

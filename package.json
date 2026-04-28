@@ -4,14 +4,16 @@
   "private": true,
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev",
     "lint": "turbo lint",
     "format": "turbo format",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "auth:generate": "dotenv -e .env -- pnpm --filter @workspace/auth auth:generate",
+    "auth:migrate": "dotenv -e .env -- pnpm --filter @workspace/auth auth:migrate"
   },
   "devDependencies": {
     "@workspace/eslint-config": "workspace:*",
     "@workspace/typescript-config": "workspace:*",
+    "dotenv-cli": "^8.0.0",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
     "turbo": "^2.8.17",
