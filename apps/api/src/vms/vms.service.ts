@@ -175,9 +175,38 @@ export class VmsService {
                       { name: "VM_SLUG", value: slug },
                       { name: "VM_NAME", value: displayName },
                       { name: "VM_AGENT", value: input.agentType },
+                      // Point `docker` (CLI) at the DinD sidecar over
+                      // the shared pod-localhost. Same pattern as the
+                      // forgejo-runner pod.
+                      { name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" },
                     ],
                     volumeMounts: [
                       { name: "data", mountPath: "/home/agent" },
+                    ],
+                  },
+                  {
+                    // Docker-in-Docker sidecar — listens plaintext on
+                    // 127.0.0.1:2375 (pod network namespace isolates).
+                    // --mtu=1450 matches the Flannel/k3s overlay so
+                    // build-container TLS handshakes don't black-hole
+                    // (same fix we applied to forgejo-runner).
+                    name: "dind",
+                    image: "docker:24-dind",
+                    args: ["--mtu=1450"],
+                    env: [
+                      // Empty DOCKER_TLS_CERTDIR → daemon binds plain
+                      // tcp://0.0.0.0:2375 (pod network is private).
+                      { name: "DOCKER_TLS_CERTDIR", value: "" },
+                    ],
+                    securityContext: {
+                      privileged: true,
+                      runAsUser: 0,
+                    },
+                    volumeMounts: [
+                      // /var/lib/docker on the VM's PVC so images +
+                      // build cache survive pod restarts. Sub-path
+                      // keeps it separate from the agent's /home.
+                      { name: "data", mountPath: "/var/lib/docker", subPath: "docker" },
                     ],
                   },
                 ],
