@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: console-api
+  labels:
+    agent-platform/component: console
+    agent-platform/role: api
+    app.kubernetes.io/instance: console
+    app.kubernetes.io/name: console
+    app.kubernetes.io/part-of: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      agent-platform/role: api
+      app.kubernetes.io/instance: console
+  template:
+    metadata:
+      labels:
+        agent-platform/component: console
+        agent-platform/role: api
+        app.kubernetes.io/instance: console
+        app.kubernetes.io/name: console
+        app.kubernetes.io/part-of: agent-platform
+    spec:
+      serviceAccountName: console-api-vms
+      imagePullSecrets:
+        - name: console-harbor-pull
+      containers:
+        - name: api
+          image: cr.dev.openschema.io/agent-platform/console-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3001
+          env:
+            # Mirrored CA from `console-platform-ca` ConfigMap so Node's
+            # HTTPS calls (Keycloak OIDC, Harbor, K8s) trust the
+            # platform root CA in selfsigned mode.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/ssl/platform/ca.crt
+          envFrom:
+            - secretRef:
+                name: console-secret
+            - configMapRef:
+                name: console-env
+            - secretRef:
+                name: openfga-bootstrap
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          volumeMounts:
+            - name: platform-ca
+              mountPath: /etc/ssl/platform
+              readOnly: true
+      volumes:
+        - name: platform-ca
+          configMap:
+            name: console-platform-ca

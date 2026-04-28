@@ -1,0 +1,21 @@
+# Argo CD reads this dir as the source of truth for the console
+# workloads. The Application's argocd-image-updater annotations write
+# `images:` overrides here so kustomize re-renders Deployments with
+# the freshly-pushed Harbor tags.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: platform-console
+
+resources:
+  - console-api.yaml
+  - console-web.yaml
+
+# Kept as `:latest` placeholders. argocd-image-updater patches the
+# Application's `kustomize.images` (NOT this file) when Harbor receives
+# a new tag, so this file stays git-clean across rolls.
+images:
+  - name: cr.dev.openschema.io/agent-platform/console-api
+    newTag: latest
+  - name: cr.dev.openschema.io/agent-platform/console-web
+    newTag: latest
