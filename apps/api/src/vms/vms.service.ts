@@ -118,7 +118,7 @@ export class VmsService {
     // Create the headless Service first so the StatefulSet's stable DNS
     // (`<name>-0.<svc>.<ns>.svc.cluster.local`) resolves the moment the
     // pod comes up.
-    await this.ensureService(ns, name)
+    await this.ensureService(ns, name, input.imageType)
 
     const apps = k8sApps()
     try {
@@ -148,7 +148,17 @@ export class VmsService {
                   {
                     name: "vm",
                     image,
-                    ports: [{ name: "http", containerPort: 8080 }],
+                    // Ports exposed by the agent-sandbox image:
+                    //   8080 = code-server, 7681 = ttyd (xterm),
+                    //   8787 = hermes-webui, 6901 = KasmVNC (desktop).
+                    ports: [
+                      { name: "http", containerPort: 8080 },
+                      { name: "xterm", containerPort: 7681 },
+                      { name: "webui", containerPort: 8787 },
+                      ...(input.imageType === "desktop"
+                        ? [{ name: "vnc", containerPort: 6901 }]
+                        : []),
+                    ],
                     env: [
                       { name: "VM_OWNER", value: ownerId },
                       { name: "VM_NAME", value: name },
@@ -238,7 +248,11 @@ export class VmsService {
     })
   }
 
-  private async ensureService(ns: string, name: string): Promise<void> {
+  private async ensureService(
+    ns: string,
+    name: string,
+    imageType: VmImageType,
+  ): Promise<void> {
     const core = k8sCore()
     try {
       await core.readNamespacedService({ name, namespace: ns })
@@ -248,6 +262,14 @@ export class VmsService {
         ?? (err as { statusCode?: number }).statusCode
       if (code !== 404) throw err
     }
+    const ports = [
+      { name: "http", port: 8080, targetPort: 8080 },
+      { name: "xterm", port: 7681, targetPort: 7681 },
+      { name: "webui", port: 8787, targetPort: 8787 },
+      ...(imageType === "desktop"
+        ? [{ name: "vnc", port: 6901, targetPort: 6901 }]
+        : []),
+    ]
     try {
       await core.createNamespacedService({
         namespace: ns,
@@ -258,7 +280,7 @@ export class VmsService {
           spec: {
             clusterIP: "None",
             selector: { "agent-platform/vm-name": name },
-            ports: [{ name: "http", port: 8080, targetPort: 8080 }],
+            ports,
           },
         },
       })
@@ -299,6 +321,7 @@ export class VmsService {
     const ts = sts.metadata?.creationTimestamp
     const createdAt =
       ts instanceof Date ? ts.toISOString() : (ts ?? new Date().toISOString())
+    const hostname = `${name}.${this.vmDomain}`
     return {
       id: sts.metadata?.uid ?? `${namespace}/${name}`,
       name,
@@ -307,8 +330,16 @@ export class VmsService {
       imageType,
       agentType,
       status,
-      hostname: `${name}.${this.vmDomain}`,
+      hostname,
       createdAt,
+      // URL convention: one hostname per service (xterm/vnc) so each
+      // gets its own HTTPRoute → backend port. Both land on the
+      // wildcard `*.vm.<domain>` listener Traefik already serves.
+      xtermUrl: `https://${name}-term.${this.vmDomain}`,
+      vncUrl:
+        imageType === "desktop"
+          ? `https://${name}-vnc.${this.vmDomain}`
+          : null,
     }
   }
 }

@@ -13,6 +13,10 @@ export type Vm = {
   status: VmStatus
   hostname: string
   createdAt: string
+  // Launch URLs. xterm is available on every VM (ttyd:7681); vnc only on
+  // the desktop image (KasmVNC:6901).
+  xtermUrl: string
+  vncUrl: string | null
 }
 
 export type CreateVmInput = {

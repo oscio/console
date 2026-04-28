@@ -82,7 +82,20 @@ export default async function VmsPage() {
                     {new Date(vm.createdAt).toLocaleString()}
                   </td>
                   <td className="px-3 py-2">
-                    <DeleteVmButton action={deleteVmAction} name={vm.name} />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <LaunchLink href={vm.xtermUrl} disabled={vm.status !== "Running"}>
+                        xterm
+                      </LaunchLink>
+                      {vm.vncUrl && (
+                        <LaunchLink
+                          href={vm.vncUrl}
+                          disabled={vm.status !== "Running"}
+                        >
+                          VNC
+                        </LaunchLink>
+                      )}
+                      <DeleteVmButton action={deleteVmAction} name={vm.name} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -109,6 +122,37 @@ function Tag({ children }: { children: React.ReactNode }) {
     <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">
       {children}
     </span>
+  )
+}
+
+function LaunchLink({
+  href,
+  disabled,
+  children,
+}: {
+  href: string
+  disabled?: boolean
+  children: React.ReactNode
+}) {
+  if (disabled) {
+    return (
+      <span
+        title="VM must be Running"
+        className="text-muted-foreground inline-flex cursor-not-allowed items-center rounded-md border px-2 py-1 text-xs opacity-50"
+      >
+        {children}
+      </span>
+    )
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="hover:bg-muted inline-flex items-center rounded-md border px-2 py-1 text-xs"
+    >
+      {children}
+    </a>
   )
 }
 

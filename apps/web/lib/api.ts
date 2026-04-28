@@ -100,6 +100,8 @@ export type Vm = {
   status: VmStatus
   hostname: string
   createdAt: string
+  xtermUrl: string
+  vncUrl: string | null
 }
 
 export async function fetchVms(cookieHeader: string): Promise<Vm[] | null> {
