@@ -80,13 +80,26 @@ export class VmsService {
     process.env.VM_GATEWAY_NAME ?? "platform-gateway"
   private readonly gatewayNamespace =
     process.env.VM_GATEWAY_NAMESPACE ?? "platform-traefik"
-  // ForwardAuth chain: oauth2-proxy (session) → optional FGA ownership
-  // check. Traefik resolves Middleware refs only within the HTTPRoute's
-  // namespace, so we clone tiny Middlewares into each VM namespace
-  // pointing at these URLs. Empty oauth URL = no auth gate at all.
+  // ForwardAuth chain: errors-redirect (401 → /oauth2/start) →
+  // oauth2-proxy /oauth2/auth (session) → console-api /vms/auth
+  // (FGA ownership). Traefik resolves Middleware refs only within
+  // the HTTPRoute's namespace, so we clone all three into each VM
+  // namespace. Empty oauth URL = no auth gate at all.
   private readonly authForwardUrl = process.env.VM_AUTH_FORWARD_URL ?? ""
   private readonly authOwnershipUrl =
     process.env.VM_AUTH_OWNERSHIP_URL ?? ""
+  // oauth2-proxy Service for the errors-redirect Middleware. When
+  // forwardAuth returns 401, Traefik fetches /oauth2/start?rd=<url>
+  // from this Service instead of returning 401 — the response is a
+  // 302 to Keycloak, so already-logged-in users get a silent SSO.
+  private readonly authOauthSvcName =
+    process.env.VM_AUTH_OAUTH_SVC_NAME ?? ""
+  private readonly authOauthSvcNamespace =
+    process.env.VM_AUTH_OAUTH_SVC_NAMESPACE ?? ""
+  private readonly authOauthSvcPort = Number(
+    process.env.VM_AUTH_OAUTH_SVC_PORT ?? "80",
+  )
+  private readonly authErrorsMiddleware = "vm-auth-errors"
   private readonly authOauthMiddleware = "vm-auth-oauth"
   private readonly authFgaMiddleware = "vm-auth-fga"
 
@@ -138,9 +151,14 @@ export class VmsService {
 
     await this.ensureNamespace(ns, ownerId)
 
-    // Per-namespace ForwardAuth Middlewares, cloned once per VM ns.
-    // First gate is oauth2-proxy (session); second is the optional
-    // console-api ownership check. Skipped when no oauth URL is set.
+    // Per-namespace Middlewares cloned into the VM ns. Order matters:
+    //  1. errors-redirect → catches 401 from forwardAuth and replaces
+    //     with a 302 to /oauth2/start (silent SSO when already logged in)
+    //  2. oauth-auth → forwardAuth → oauth2-proxy /oauth2/auth (session)
+    //  3. fga → forwardAuth → console-api /vms/auth (ownership)
+    if (this.authForwardUrl && this.authOauthSvcName) {
+      await this.ensureErrorsMiddleware(ns)
+    }
     if (this.authForwardUrl) {
       await this.ensureAuthMiddleware(
         ns,
@@ -363,14 +381,18 @@ export class VmsService {
     const custom = k8sCustom()
     const name = `${slug}-${svc}`
     const hostname = `${slug}-${svc}.${this.vmDomain}`
-    // ExtensionRef chain: oauth2-proxy first (sets X-Auth-Request-*
-    // headers), then console-api ownership check uses those headers.
-    // Both Middlewares are cloned into this ns by ensureAuthMiddleware.
+    // ExtensionRef chain. errors-redirect goes first (outermost) so
+    // it can catch 401 from the forwardAuth middlewares and replace
+    // with a 302 to /oauth2/start. Then oauth (sets X-Auth-Request-*
+    // headers), then fga (consumes those headers).
     const filterFor = (name: string) => ({
       type: "ExtensionRef",
       extensionRef: { group: "traefik.io", kind: "Middleware", name },
     })
     const authFilters: Array<ReturnType<typeof filterFor>> = []
+    if (this.authForwardUrl && this.authOauthSvcName) {
+      authFilters.push(filterFor(this.authErrorsMiddleware))
+    }
     if (this.authForwardUrl) authFilters.push(filterFor(this.authOauthMiddleware))
     if (this.authOwnershipUrl) authFilters.push(filterFor(this.authFgaMiddleware))
     const body = {
@@ -415,6 +437,49 @@ export class VmsService {
         ?? (err as { statusCode?: number }).statusCode
       if (code === 409) return // already exists, fine
       rethrowK8sError(err, `Failed to create HTTPRoute "${name}"`)
+    }
+  }
+
+  // Errors middleware: catches 401 from the chain and replaces the
+  // response with whatever oauth2-proxy returns at /oauth2/start —
+  // a 302 to Keycloak. Cross-namespace Service ref (oauth2-proxy
+  // lives in its own ns); Traefik supports `namespace` on the
+  // service field.
+  private async ensureErrorsMiddleware(ns: string): Promise<void> {
+    const custom = k8sCustom()
+    const body = {
+      apiVersion: "traefik.io/v1alpha1",
+      kind: "Middleware",
+      metadata: {
+        name: this.authErrorsMiddleware,
+        namespace: ns,
+        labels: { [VM_LABEL]: VM_LABEL_VALUE },
+      },
+      spec: {
+        errors: {
+          status: ["401"],
+          service: {
+            name: this.authOauthSvcName,
+            namespace: this.authOauthSvcNamespace,
+            port: this.authOauthSvcPort,
+          },
+          query: "/oauth2/start?rd={url}",
+        },
+      },
+    }
+    try {
+      await custom.createNamespacedCustomObject({
+        group: "traefik.io",
+        version: "v1alpha1",
+        namespace: ns,
+        plural: "middlewares",
+        body,
+      })
+    } catch (err: unknown) {
+      const code = (err as { code?: number; statusCode?: number }).code
+        ?? (err as { statusCode?: number }).statusCode
+      if (code === 409) return
+      rethrowK8sError(err, `Failed to create errors Middleware in ${ns}`)
     }
   }
 
