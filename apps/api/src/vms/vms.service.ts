@@ -528,7 +528,7 @@ export class VmsService {
           metadata: { name, namespace: ns, labels: { [VM_LABEL]: VM_LABEL_VALUE } },
           spec: {
             clusterIP: "None",
-            selector: { "agent-platform/vm-name": name },
+            selector: { "agent-platform/vm-slug": name },
             ports,
           },
         },
