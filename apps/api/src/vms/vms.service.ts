@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common"
 import { randomBytes } from "node:crypto"
-import { k8sApps, k8sCore } from "./k8s.client"
+import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
 import {
   CreateVmInput,
   Vm,
@@ -70,6 +70,12 @@ export class VmsService {
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
+  // Gateway API parent ref for per-VM HTTPRoutes. Defaults match the
+  // dev cluster's `platform-gateway` in `platform-traefik`.
+  private readonly gatewayName =
+    process.env.VM_GATEWAY_NAME ?? "platform-gateway"
+  private readonly gatewayNamespace =
+    process.env.VM_GATEWAY_NAMESPACE ?? "platform-traefik"
 
   imageFor(type: VmImageType): string {
     const ref = type === "desktop" ? this.imageDesktop : this.imageBase
@@ -201,6 +207,26 @@ export class VmsService {
       rethrowK8sError(err, `Failed to create VM "${slug}"`)
     }
 
+    // Per-VM HTTPRoutes: <slug>-term → :7681, <slug>-vnc → :6901.
+    // Gateway listener allows routes from all namespaces, so the route
+    // can live next to the Service in the resource-vm-<owner> ns.
+    await this.ensureHttpRoute(
+      ns,
+      `${slug}-term`,
+      `${slug}-term.${this.vmDomain}`,
+      slug,
+      7681,
+    )
+    if (input.imageType === "desktop") {
+      await this.ensureHttpRoute(
+        ns,
+        `${slug}-vnc`,
+        `${slug}-vnc.${this.vmDomain}`,
+        slug,
+        6901,
+      )
+    }
+
     const vms = await this.listForOwner(ownerId)
     const created = vms.find((v) => v.slug === slug)
     if (!created) throw new NotFoundException("VM created but not found.")
@@ -232,6 +258,80 @@ export class VmsService {
         labelSelector: `agent-platform/vm-slug=${cleanSlug}`,
       })
       .catch(() => undefined)
+    // Tear down the HTTPRoutes too — both term and (maybe) vnc.
+    for (const suffix of ["term", "vnc"]) {
+      await this.deleteHttpRoute(ns, `${cleanSlug}-${suffix}`).catch(
+        () => undefined,
+      )
+    }
+  }
+
+  private async ensureHttpRoute(
+    ns: string,
+    name: string,
+    hostname: string,
+    backendService: string,
+    backendPort: number,
+  ): Promise<void> {
+    const custom = k8sCustom()
+    const body = {
+      apiVersion: "gateway.networking.k8s.io/v1",
+      kind: "HTTPRoute",
+      metadata: {
+        name,
+        namespace: ns,
+        labels: { [VM_LABEL]: VM_LABEL_VALUE },
+      },
+      spec: {
+        hostnames: [hostname],
+        parentRefs: [
+          {
+            group: "gateway.networking.k8s.io",
+            kind: "Gateway",
+            name: this.gatewayName,
+            namespace: this.gatewayNamespace,
+          },
+        ],
+        rules: [
+          {
+            matches: [{ path: { type: "PathPrefix", value: "/" } }],
+            backendRefs: [
+              {
+                group: "",
+                kind: "Service",
+                name: backendService,
+                port: backendPort,
+              },
+            ],
+          },
+        ],
+      },
+    }
+    try {
+      await custom.createNamespacedCustomObject({
+        group: "gateway.networking.k8s.io",
+        version: "v1",
+        namespace: ns,
+        plural: "httproutes",
+        body,
+      })
+    } catch (err: unknown) {
+      const code = (err as { code?: number; statusCode?: number }).code
+        ?? (err as { statusCode?: number }).statusCode
+      if (code === 409) return // already exists, fine
+      rethrowK8sError(err, `Failed to create HTTPRoute "${name}"`)
+    }
+  }
+
+  private async deleteHttpRoute(ns: string, name: string): Promise<void> {
+    const custom = k8sCustom()
+    await custom.deleteNamespacedCustomObject({
+      group: "gateway.networking.k8s.io",
+      version: "v1",
+      namespace: ns,
+      plural: "httproutes",
+      name,
+    })
   }
 
   private async ensureNamespace(ns: string, ownerId: string): Promise<void> {
