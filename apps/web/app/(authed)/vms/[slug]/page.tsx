@@ -108,10 +108,6 @@ function Details({ vm }: { vm: Vm }) {
       <dd>
         <Badge variant="secondary">{vm.imageType}</Badge>
       </dd>
-      <dt className="text-muted-foreground">Agent</dt>
-      <dd>
-        <Badge variant="secondary">{vm.agentType}</Badge>
-      </dd>
       <dt className="text-muted-foreground">Status</dt>
       <dd>
         <StatusBadge status={vm.status} />

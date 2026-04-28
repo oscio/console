@@ -34,7 +34,6 @@ export function NewVmForm({ action }: { action: Action }) {
   // renders a Radix Listbox, not a native <select>). Mirror its value
   // into a hidden input so server-action FormData picks it up.
   const [imageType, setImageType] = useState<"base" | "desktop">("base")
-  const [agentType, setAgentType] = useState<"hermes" | "none">("hermes")
 
   return (
     <Dialog
@@ -102,26 +101,6 @@ export function NewVmForm({ action }: { action: Action }) {
               <SelectContent>
                 <SelectItem value="base">base</SelectItem>
                 <SelectItem value="desktop">desktop</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field
-            id="vm-agent"
-            label="Agent"
-            hint="The in-VM agent runtime. `none` runs the sandbox image without an agent."
-          >
-            <input type="hidden" name="agentType" value={agentType} />
-            <Select
-              value={agentType}
-              onValueChange={(v) => setAgentType(v as "hermes" | "none")}
-            >
-              <SelectTrigger id="vm-agent" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hermes">hermes</SelectItem>
-                <SelectItem value="none">none</SelectItem>
               </SelectContent>
             </Select>
           </Field>

@@ -1,5 +1,9 @@
 export type VmImageType = "base" | "desktop"
-export type VmAgentType = "hermes" | "none"
+// `agentType` is a placeholder for now — future in-VM agents will be
+// wired by a `.sh` entrypoint, not selected at create time. Keeping
+// the field on the resource (label + API surface) so we don't break
+// existing tuples; "none" is the only value today.
+export type VmAgentType = "none"
 
 export type VmStatus = "Pending" | "Running" | "Failed" | "Unknown"
 

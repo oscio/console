@@ -26,7 +26,7 @@ async function createVmAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
   const imageType = String(formData.get("imageType") ?? "base") as VmImageType
-  const agentType = String(formData.get("agentType") ?? "hermes") as VmAgentType
+  const agentType = String(formData.get("agentType") ?? "none") as VmAgentType
   const storageSize = String(formData.get("storageSize") ?? "10Gi").trim()
   if (!name) return { error: "name is required" }
   try {
@@ -74,7 +74,6 @@ export default async function VmsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>ID</TableHead>
                 <TableHead>Image</TableHead>
-                <TableHead>Agent</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -93,9 +92,6 @@ export default async function VmsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{vm.imageType}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{vm.agentType}</Badge>
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={vm.status} />
@@ -120,7 +116,7 @@ export default async function VmsPage() {
               {vms.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={6}
                     className="text-muted-foreground py-6 text-center"
                   >
                     No VMs yet.

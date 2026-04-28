@@ -20,7 +20,7 @@ import { VmsService } from "./vms.service"
 import { CreateVmInput, VmAgentType, VmImageType } from "./vms.types"
 
 const ALLOWED_IMAGE: ReadonlySet<VmImageType> = new Set(["base", "desktop"])
-const ALLOWED_AGENT: ReadonlySet<VmAgentType> = new Set(["hermes", "none"])
+const ALLOWED_AGENT: ReadonlySet<VmAgentType> = new Set(["none"])
 
 // Traefik ForwardAuth target. Called for every request to a VM
 // hostname (vm-XXX-{term,code,vnc}.vm.<domain>) AFTER oauth2-proxy
@@ -91,7 +91,7 @@ export class VmsController {
   ) {
     const name = (body.name ?? "").toString().trim()
     const imageType = body.imageType as VmImageType
-    const agentType = (body.agentType ?? "hermes") as VmAgentType
+    const agentType = (body.agentType ?? "none") as VmAgentType
     if (!name) throw new BadRequestException("name is required")
     if (!ALLOWED_IMAGE.has(imageType)) {
       throw new BadRequestException("imageType must be 'base' or 'desktop'")

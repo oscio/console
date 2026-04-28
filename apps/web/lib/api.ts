@@ -87,7 +87,7 @@ export async function setConsoleAdminRole(
 }
 
 export type VmImageType = "base" | "desktop"
-export type VmAgentType = "hermes" | "none"
+export type VmAgentType = "none"
 export type VmStatus = "Pending" | "Running" | "Failed" | "Unknown"
 
 export type Vm = {
@@ -154,5 +154,71 @@ export async function deleteVm(
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => "")
     throw new Error(`vms delete failed: ${res.status} ${text}`)
+  }
+}
+
+export type AgentType = "hermes" | "openclaw"
+export type AgentStatus = VmStatus
+
+export type Agent = {
+  id: string
+  slug: string
+  name: string
+  owner: string
+  namespace: string
+  agentType: AgentType
+  status: AgentStatus
+  hostname: string
+  createdAt: string
+  gatewayUrl: string
+}
+
+export async function fetchAgents(
+  cookieHeader: string,
+): Promise<Agent[] | null> {
+  const res = await fetch(`${API_URL}/agents`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) throw new Error(`agents list failed: ${res.status}`)
+  return (await res.json()) as Agent[]
+}
+
+export async function createAgent(
+  cookieHeader: string,
+  input: {
+    name: string
+    agentType: AgentType
+    storageSize?: string
+  },
+): Promise<Agent> {
+  const res = await fetch(`${API_URL}/agents`, {
+    method: "POST",
+    headers: {
+      cookie: cookieHeader,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agents create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Agent
+}
+
+export async function deleteAgent(
+  cookieHeader: string,
+  slug: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/agents/${encodeURIComponent(slug)}`,
+    { method: "DELETE", headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agents delete failed: ${res.status} ${text}`)
   }
 }
