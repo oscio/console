@@ -1,7 +1,15 @@
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
-import { fetchVms, type Vm } from "@/lib/api"
+import { Badge } from "@workspace/ui/components/badge"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@workspace/ui/components/card"
+import { fetchVms, type Vm, type VmStatus } from "@/lib/api"
 import {
   ArrowSquareOut,
   Cube,
@@ -38,17 +46,21 @@ export default async function VmDetailPage({
         >
           ← Back to VMs
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">{vm.name}</h1>
-        <p className="text-muted-foreground text-xs font-mono">{vm.slug}</p>
+        <div className="mt-2 flex items-center gap-3">
+          <h1 className="text-2xl font-semibold">{vm.name}</h1>
+          <StatusBadge status={vm.status} />
+        </div>
+        <p className="text-muted-foreground font-mono text-xs">{vm.slug}</p>
       </div>
 
-      <Section title="Launch">
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Launch</h2>
         {!isRunning && (
-          <p className="text-muted-foreground mb-3 text-xs">
-            Status is {vm.status}. Buttons activate once the VM is Running.
+          <p className="text-muted-foreground text-xs">
+            Buttons activate once the VM is Running.
           </p>
         )}
-        <div className="flex flex-wrap gap-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <LaunchCard
             href={vm.codeUrl}
             disabled={!isRunning}
@@ -73,29 +85,17 @@ export default async function VmDetailPage({
             />
           )}
         </div>
-      </Section>
+      </section>
 
-      <Section title="Details">
-        <Details vm={vm} />
-      </Section>
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Details</h2>
+        <Card>
+          <CardContent>
+            <Details vm={vm} />
+          </CardContent>
+        </Card>
+      </section>
     </div>
-  )
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <div className="bg-card text-card-foreground rounded-md border p-4">
-        {children}
-      </div>
-    </section>
   )
 }
 
@@ -105,11 +105,17 @@ function Details({ vm }: { vm: Vm }) {
       <dt className="text-muted-foreground">ID</dt>
       <dd className="font-mono">{vm.slug}</dd>
       <dt className="text-muted-foreground">Image</dt>
-      <dd>{vm.imageType}</dd>
+      <dd>
+        <Badge variant="secondary">{vm.imageType}</Badge>
+      </dd>
       <dt className="text-muted-foreground">Agent</dt>
-      <dd>{vm.agentType}</dd>
+      <dd>
+        <Badge variant="secondary">{vm.agentType}</Badge>
+      </dd>
       <dt className="text-muted-foreground">Status</dt>
-      <dd>{vm.status}</dd>
+      <dd>
+        <StatusBadge status={vm.status} />
+      </dd>
       <dt className="text-muted-foreground">Hostname</dt>
       <dd className="font-mono text-xs">{vm.hostname}</dd>
       <dt className="text-muted-foreground">Namespace</dt>
@@ -133,33 +139,54 @@ function LaunchCard({
   title: string
   blurb: string
 }) {
-  const className =
-    "group bg-background hover:border-foreground/30 flex w-64 flex-col gap-2 rounded-md border p-4 text-left transition-colors"
   const inner = (
-    <>
-      <div className="flex items-center gap-2">
-        {icon}
-        <span className="text-sm font-medium">{title}</span>
-        {!disabled && (
-          <ArrowSquareOut
-            className="text-muted-foreground group-hover:text-foreground ml-auto size-4 transition-colors"
-            weight="bold"
-          />
-        )}
-      </div>
-      <p className="text-muted-foreground text-xs leading-relaxed">{blurb}</p>
-    </>
+    <Card
+      className={`group transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-50"
+          : "hover:border-foreground/30"
+      }`}
+      aria-disabled={disabled || undefined}
+    >
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          {icon}
+          <CardTitle className="text-sm">{title}</CardTitle>
+          {!disabled && (
+            <ArrowSquareOut
+              className="text-muted-foreground group-hover:text-foreground ml-auto size-4 transition-colors"
+              weight="bold"
+            />
+          )}
+        </div>
+        <CardDescription className="text-xs leading-relaxed">
+          {blurb}
+        </CardDescription>
+      </CardHeader>
+    </Card>
   )
-  if (disabled) {
-    return (
-      <div className={`${className} cursor-not-allowed opacity-50`} aria-disabled="true">
-        {inner}
-      </div>
-    )
-  }
+  if (disabled) return inner
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={className}>
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-md"
+    >
       {inner}
     </a>
   )
+}
+
+function StatusBadge({ status }: { status: VmStatus }) {
+  switch (status) {
+    case "Running":
+      return <Badge>{status}</Badge>
+    case "Failed":
+      return <Badge variant="destructive">{status}</Badge>
+    case "Pending":
+    case "Unknown":
+    default:
+      return <Badge variant="outline">{status}</Badge>
+  }
 }

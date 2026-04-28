@@ -1,12 +1,23 @@
 import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 import Link from "next/link"
+import { Badge } from "@workspace/ui/components/badge"
+import { Button } from "@workspace/ui/components/button"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@workspace/ui/components/table"
 import {
   createVm,
   deleteVm,
   fetchVms,
   type VmAgentType,
   type VmImageType,
+  type VmStatus,
 } from "@/lib/api"
 import { DeleteVmButton, NewVmForm } from "./new-vm-form"
 
@@ -57,97 +68,85 @@ export default async function VmsPage() {
         </p>
       ) : (
         <div className="overflow-hidden rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide">
-              <tr>
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">ID</th>
-                <th className="px-3 py-2 font-medium">Image</th>
-                <th className="px-3 py-2 font-medium">Agent</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Created</th>
-                <th className="px-3 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>ID</TableHead>
+                <TableHead>Image</TableHead>
+                <TableHead>Agent</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {vms.map((vm) => (
-                <tr key={vm.id} className="hover:bg-muted/20">
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/vms/${vm.slug}`}
-                      className="hover:underline"
-                    >
+                <TableRow key={vm.id}>
+                  <TableCell>
+                    <Link href={`/vms/${vm.slug}`} className="hover:underline">
                       {vm.name}
                     </Link>
-                  </td>
-                  <td className="text-muted-foreground px-3 py-2 font-mono text-xs">
+                  </TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-xs">
                     {vm.slug}
-                  </td>
-                  <td className="px-3 py-2"><Tag>{vm.imageType}</Tag></td>
-                  <td className="px-3 py-2"><Tag>{vm.agentType}</Tag></td>
-                  <td className="px-3 py-2">
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{vm.imageType}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{vm.agentType}</Badge>
+                  </TableCell>
+                  <TableCell>
                     <StatusBadge status={vm.status} />
-                  </td>
-                  <td className="text-muted-foreground px-3 py-2 text-xs">
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
                     {new Date(vm.createdAt).toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Link
-                        href={`/vms/${vm.slug}`}
-                        className="hover:bg-muted inline-flex items-center rounded-md border px-2 py-1 text-xs"
-                      >
-                        Open
-                      </Link>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/vms/${vm.slug}`}>Open</Link>
+                      </Button>
                       <DeleteVmButton
                         action={deleteVmAction}
                         slug={vm.slug}
                         label={vm.name}
                       />
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
               {vms.length === 0 && (
-                <tr>
-                  <td
+                <TableRow>
+                  <TableCell
                     colSpan={7}
-                    className="text-muted-foreground px-3 py-6 text-center"
+                    className="text-muted-foreground py-6 text-center"
                   >
                     No VMs yet.
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
   )
 }
 
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">
-      {children}
-    </span>
-  )
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const tone =
-    status === "Running"
-      ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
-      : status === "Failed"
-        ? "border-red-500/40 text-red-600 dark:text-red-400"
-        : status === "Pending"
-          ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
-          : "text-muted-foreground"
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${tone}`}
-    >
-      {status}
-    </span>
-  )
+function StatusBadge({ status }: { status: VmStatus }) {
+  // Map VM lifecycle states to shadcn Badge variants. `Running` reuses
+  // the success-leaning default; everything else falls back to the
+  // muted variants so the table stays calm.
+  switch (status) {
+    case "Running":
+      return <Badge>{status}</Badge>
+    case "Failed":
+      return <Badge variant="destructive">{status}</Badge>
+    case "Pending":
+    case "Unknown":
+    default:
+      return <Badge variant="outline">{status}</Badge>
+  }
 }

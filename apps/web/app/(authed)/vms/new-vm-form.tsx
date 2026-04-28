@@ -4,6 +4,14 @@ import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import {
   Sheet,
   SheetClose,
@@ -22,6 +30,11 @@ export function NewVmForm({ action }: { action: Action }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
+  // shadcn Select doesn't bubble to the underlying form on submit (it
+  // renders a Radix Listbox, not a native <select>). Mirror its value
+  // into a hidden input so server-action FormData picks it up.
+  const [imageType, setImageType] = useState<"base" | "desktop">("base")
+  const [agentType, setAgentType] = useState<"hermes" | "none">("hermes")
 
   return (
     <Sheet
@@ -38,7 +51,8 @@ export function NewVmForm({ action }: { action: Action }) {
         <SheetHeader>
           <SheetTitle>New VM</SheetTitle>
           <SheetDescription>
-            Provisions a StatefulSet (1 replica) in your <code>resource-vm-…</code> namespace.
+            Provisions a StatefulSet (1 replica) in your{" "}
+            <code>resource-vm-…</code> namespace.
           </SheetDescription>
         </SheetHeader>
 
@@ -59,10 +73,12 @@ export function NewVmForm({ action }: { action: Action }) {
           }
         >
           <Field
+            id="vm-name"
             label="Name"
             hint="A label just for you. The hostname is auto-generated."
           >
             <Input
+              id="vm-name"
               name="name"
               required
               maxLength={200}
@@ -71,27 +87,56 @@ export function NewVmForm({ action }: { action: Action }) {
           </Field>
 
           <Field
+            id="vm-image"
             label="Image"
             hint="Base = code-server + agent runtime. Desktop adds XFCE + KasmVNC."
           >
-            <Select name="imageType" defaultValue="base">
-              <option value="base">base</option>
-              <option value="desktop">desktop</option>
+            <input type="hidden" name="imageType" value={imageType} />
+            <Select
+              value={imageType}
+              onValueChange={(v) => setImageType(v as "base" | "desktop")}
+            >
+              <SelectTrigger id="vm-image" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="base">base</SelectItem>
+                <SelectItem value="desktop">desktop</SelectItem>
+              </SelectContent>
             </Select>
           </Field>
 
           <Field
+            id="vm-agent"
             label="Agent"
             hint="The in-VM agent runtime. `none` runs the sandbox image without an agent."
           >
-            <Select name="agentType" defaultValue="hermes">
-              <option value="hermes">hermes</option>
-              <option value="none">none</option>
+            <input type="hidden" name="agentType" value={agentType} />
+            <Select
+              value={agentType}
+              onValueChange={(v) => setAgentType(v as "hermes" | "none")}
+            >
+              <SelectTrigger id="vm-agent" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hermes">hermes</SelectItem>
+                <SelectItem value="none">none</SelectItem>
+              </SelectContent>
             </Select>
           </Field>
 
-          <Field label="Storage" hint="PersistentVolumeClaim size for /home/agent.">
-            <Input name="storageSize" defaultValue="10Gi" placeholder="10Gi" />
+          <Field
+            id="vm-storage"
+            label="Storage"
+            hint="PersistentVolumeClaim size for /home/agent."
+          >
+            <Input
+              id="vm-storage"
+              name="storageSize"
+              defaultValue="10Gi"
+              placeholder="10Gi"
+            />
           </Field>
 
           {error && (
@@ -120,29 +165,22 @@ export function NewVmForm({ action }: { action: Action }) {
 }
 
 function Field({
+  id,
   label,
   hint,
   children,
 }: {
+  id: string
   label: string
   hint?: string
   children: React.ReactNode
 }) {
   return (
-    <label className="block space-y-1.5 text-sm">
-      <span className="font-medium">{label}</span>
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
       {children}
-      {hint && <span className="text-muted-foreground block text-xs">{hint}</span>}
-    </label>
-  )
-}
-
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      {...props}
-      className="border-input bg-background focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-1 focus-visible:outline-none"
-    />
+      {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
+    </div>
   )
 }
 
@@ -159,12 +197,19 @@ export function DeleteVmButton({
   return (
     <form
       action={(fd) => {
-        if (!confirm(`Delete VM "${label}" (${slug})? This is irreversible.`)) return
+        if (!confirm(`Delete VM "${label}" (${slug})? This is irreversible.`))
+          return
         startTransition(() => action(fd))
       }}
     >
       <input type="hidden" name="slug" value={slug} />
-      <Button type="submit" variant="outline" size="sm" disabled={pending}>
+      <Button
+        type="submit"
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        className="text-destructive hover:text-destructive"
+      >
         {pending ? "Deleting…" : "Delete"}
       </Button>
     </form>
