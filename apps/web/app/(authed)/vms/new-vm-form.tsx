@@ -13,15 +13,15 @@ import {
   SelectValue,
 } from "@workspace/ui/components/select"
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@workspace/ui/components/sheet"
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@workspace/ui/components/dialog"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -37,28 +37,28 @@ export function NewVmForm({ action }: { action: Action }) {
   const [agentType, setAgentType] = useState<"hermes" | "none">("hermes")
 
   return (
-    <Sheet
+    <Dialog
       open={open}
       onOpenChange={(o) => {
         setOpen(o)
         if (!o) setError(null)
       }}
     >
-      <SheetTrigger asChild>
+      <DialogTrigger asChild>
         <Button>Create VM</Button>
-      </SheetTrigger>
-      <SheetContent className="flex w-full flex-col gap-0 sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>New VM</SheetTitle>
-          <SheetDescription>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New VM</DialogTitle>
+          <DialogDescription>
             Provisions a StatefulSet (1 replica) in your{" "}
             <code>resource-vm-…</code> namespace.
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <form
           id="new-vm-form"
-          className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
+          className="space-y-4"
           action={(fd) =>
             startTransition(async () => {
               setError(null)
@@ -142,25 +142,25 @@ export function NewVmForm({ action }: { action: Action }) {
           {error && (
             <p
               role="alert"
-              className="text-destructive border-destructive/30 bg-destructive/5 rounded-md border px-3 py-2 text-sm"
+              className="text-destructive border-destructive/30 bg-destructive/5 border px-3 py-2 text-sm"
             >
               {error}
             </p>
           )}
         </form>
 
-        <SheetFooter>
-          <SheetClose asChild>
+        <DialogFooter>
+          <DialogClose asChild>
             <Button variant="outline" disabled={pending}>
               Cancel
             </Button>
-          </SheetClose>
+          </DialogClose>
           <Button form="new-vm-form" type="submit" disabled={pending}>
             {pending ? "Creating…" : "Create VM"}
           </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

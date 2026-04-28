@@ -67,7 +67,7 @@ export default async function VmsPage() {
           Not authenticated against the VMs API.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-md border">
+        <div className="overflow-hidden border">
           <Table>
             <TableHeader>
               <TableRow>

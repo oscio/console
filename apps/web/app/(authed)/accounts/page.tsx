@@ -94,7 +94,7 @@ export default async function AccountsPage() {
               {users.length} total
             </span>
           </div>
-          <div className="overflow-hidden rounded-md border">
+          <div className="overflow-hidden border">
             <Table>
               <TableHeader>
                 <TableRow>
