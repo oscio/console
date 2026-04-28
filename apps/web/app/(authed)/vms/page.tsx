@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
+import Link from "next/link"
 import {
   createVm,
   deleteVm,
@@ -64,7 +65,6 @@ export default async function VmsPage() {
                 <th className="px-3 py-2 font-medium">Image</th>
                 <th className="px-3 py-2 font-medium">Agent</th>
                 <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Hostname</th>
                 <th className="px-3 py-2 font-medium">Created</th>
                 <th className="px-3 py-2 font-medium">Actions</th>
               </tr>
@@ -72,7 +72,14 @@ export default async function VmsPage() {
             <tbody className="divide-y">
               {vms.map((vm) => (
                 <tr key={vm.id} className="hover:bg-muted/20">
-                  <td className="px-3 py-2">{vm.name}</td>
+                  <td className="px-3 py-2">
+                    <Link
+                      href={`/vms/${vm.slug}`}
+                      className="hover:underline"
+                    >
+                      {vm.name}
+                    </Link>
+                  </td>
                   <td className="text-muted-foreground px-3 py-2 font-mono text-xs">
                     {vm.slug}
                   </td>
@@ -81,23 +88,17 @@ export default async function VmsPage() {
                   <td className="px-3 py-2">
                     <StatusBadge status={vm.status} />
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs">{vm.hostname}</td>
                   <td className="text-muted-foreground px-3 py-2 text-xs">
                     {new Date(vm.createdAt).toLocaleString()}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <LaunchLink href={vm.xtermUrl} disabled={vm.status !== "Running"}>
-                        xterm
-                      </LaunchLink>
-                      {vm.vncUrl && (
-                        <LaunchLink
-                          href={vm.vncUrl}
-                          disabled={vm.status !== "Running"}
-                        >
-                          VNC
-                        </LaunchLink>
-                      )}
+                      <Link
+                        href={`/vms/${vm.slug}`}
+                        className="hover:bg-muted inline-flex items-center rounded-md border px-2 py-1 text-xs"
+                      >
+                        Open
+                      </Link>
                       <DeleteVmButton
                         action={deleteVmAction}
                         slug={vm.slug}
@@ -110,7 +111,7 @@ export default async function VmsPage() {
               {vms.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={7}
                     className="text-muted-foreground px-3 py-6 text-center"
                   >
                     No VMs yet.
@@ -130,37 +131,6 @@ function Tag({ children }: { children: React.ReactNode }) {
     <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">
       {children}
     </span>
-  )
-}
-
-function LaunchLink({
-  href,
-  disabled,
-  children,
-}: {
-  href: string
-  disabled?: boolean
-  children: React.ReactNode
-}) {
-  if (disabled) {
-    return (
-      <span
-        title="VM must be Running"
-        className="text-muted-foreground inline-flex cursor-not-allowed items-center rounded-md border px-2 py-1 text-xs opacity-50"
-      >
-        {children}
-      </span>
-    )
-  }
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="hover:bg-muted inline-flex items-center rounded-md border px-2 py-1 text-xs"
-    >
-      {children}
-    </a>
   )
 }
 

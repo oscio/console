@@ -102,6 +102,7 @@ export type Vm = {
   hostname: string
   createdAt: string
   xtermUrl: string
+  codeUrl: string
   vncUrl: string | null
 }
 

@@ -70,6 +70,10 @@ export class VmsService {
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
+  // Console hostname carries every VM's launch URLs as `/vms/<slug>/...`
+  // so they reuse the existing trusted cert (no per-host CA-trust dance).
+  private readonly consoleHostname =
+    process.env.CONSOLE_HOSTNAME ?? "console.localhost"
   // Gateway API parent ref for per-VM HTTPRoutes. Defaults match the
   // dev cluster's `platform-gateway` in `platform-traefik`.
   private readonly gatewayName =
@@ -175,6 +179,12 @@ export class VmsService {
                       { name: "VM_SLUG", value: slug },
                       { name: "VM_NAME", value: displayName },
                       { name: "VM_AGENT", value: input.agentType },
+                      // Sub-path config picked up by the agent-sandbox
+                      // image's supervisord (ttyd `-b`, KasmVNC
+                      // `basepath`). code-server doesn't need the hint —
+                      // strip-prefix at the Gateway is enough.
+                      { name: "TTYD_BASE_PATH", value: `/vms/${slug}/term` },
+                      { name: "KASM_BASE_PATH", value: `/vms/${slug}/vnc` },
                     ],
                     volumeMounts: [
                       { name: "data", mountPath: "/home/agent" },
@@ -207,25 +217,11 @@ export class VmsService {
       rethrowK8sError(err, `Failed to create VM "${slug}"`)
     }
 
-    // Per-VM HTTPRoutes: <slug>-term → :7681, <slug>-vnc → :6901.
-    // Gateway listener allows routes from all namespaces, so the route
-    // can live next to the Service in the resource-vm-<owner> ns.
-    await this.ensureHttpRoute(
-      ns,
-      `${slug}-term`,
-      `${slug}-term.${this.vmDomain}`,
-      slug,
-      7681,
-    )
-    if (input.imageType === "desktop") {
-      await this.ensureHttpRoute(
-        ns,
-        `${slug}-vnc`,
-        `${slug}-vnc.${this.vmDomain}`,
-        slug,
-        6901,
-      )
-    }
+    // One HTTPRoute on the console hostname with three path-based rules
+    // (term/vnc/code) → backend ports. URLRewrite strips the
+    // `/vms/<slug>/<svc>` prefix so each upstream sees `/`. Gateway
+    // listener allows routes from all namespaces.
+    await this.ensureHttpRoute(ns, slug, input.imageType)
 
     const vms = await this.listForOwner(ownerId)
     const created = vms.find((v) => v.slug === slug)
@@ -258,32 +254,47 @@ export class VmsService {
         labelSelector: `agent-platform/vm-slug=${cleanSlug}`,
       })
       .catch(() => undefined)
-    // Tear down the HTTPRoutes too — both term and (maybe) vnc.
-    for (const suffix of ["term", "vnc"]) {
-      await this.deleteHttpRoute(ns, `${cleanSlug}-${suffix}`).catch(
-        () => undefined,
-      )
-    }
+    await this.deleteHttpRoute(ns, cleanSlug).catch(() => undefined)
   }
 
+  // One HTTPRoute per VM, named after the slug, with path rules for
+  // term/code (every VM) and vnc (desktop only). URLRewrite strips the
+  // `/vms/<slug>/<svc>` prefix so each upstream sees the request at `/`.
   private async ensureHttpRoute(
     ns: string,
-    name: string,
-    hostname: string,
-    backendService: string,
-    backendPort: number,
+    slug: string,
+    imageType: VmImageType,
   ): Promise<void> {
     const custom = k8sCustom()
+    const rule = (svc: string, port: number) => ({
+      matches: [
+        { path: { type: "PathPrefix", value: `/vms/${slug}/${svc}` } },
+      ],
+      filters: [
+        {
+          type: "URLRewrite",
+          urlRewrite: {
+            path: { type: "ReplacePrefixMatch", replacePrefixMatch: "/" },
+          },
+        },
+      ],
+      backendRefs: [
+        { group: "", kind: "Service", name: slug, port },
+      ],
+    })
+    const rules = [rule("term", 7681), rule("code", 8080)]
+    if (imageType === "desktop") rules.push(rule("vnc", 6901))
+
     const body = {
       apiVersion: "gateway.networking.k8s.io/v1",
       kind: "HTTPRoute",
       metadata: {
-        name,
+        name: slug,
         namespace: ns,
         labels: { [VM_LABEL]: VM_LABEL_VALUE },
       },
       spec: {
-        hostnames: [hostname],
+        hostnames: [this.consoleHostname],
         parentRefs: [
           {
             group: "gateway.networking.k8s.io",
@@ -292,19 +303,7 @@ export class VmsService {
             namespace: this.gatewayNamespace,
           },
         ],
-        rules: [
-          {
-            matches: [{ path: { type: "PathPrefix", value: "/" } }],
-            backendRefs: [
-              {
-                group: "",
-                kind: "Service",
-                name: backendService,
-                port: backendPort,
-              },
-            ],
-          },
-        ],
+        rules,
       },
     }
     try {
@@ -319,7 +318,7 @@ export class VmsService {
       const code = (err as { code?: number; statusCode?: number }).code
         ?? (err as { statusCode?: number }).statusCode
       if (code === 409) return // already exists, fine
-      rethrowK8sError(err, `Failed to create HTTPRoute "${name}"`)
+      rethrowK8sError(err, `Failed to create HTTPRoute "${slug}"`)
     }
   }
 
@@ -452,13 +451,13 @@ export class VmsService {
       status,
       hostname,
       createdAt,
-      // URL convention: one hostname per service (xterm/vnc) so each
-      // gets its own HTTPRoute → backend port. Both land on the
-      // wildcard `*.vm.<domain>` listener Traefik already serves.
-      xtermUrl: `https://${slug}-term.${this.vmDomain}`,
+      // Path-based on the console hostname → reuses its trusted cert.
+      // The HTTPRoute does the URL rewrite to drop the prefix.
+      xtermUrl: `https://${this.consoleHostname}/vms/${slug}/term/`,
+      codeUrl: `https://${this.consoleHostname}/vms/${slug}/code/`,
       vncUrl:
         imageType === "desktop"
-          ? `https://${slug}-vnc.${this.vmDomain}`
+          ? `https://${this.consoleHostname}/vms/${slug}/vnc/`
           : null,
     }
   }

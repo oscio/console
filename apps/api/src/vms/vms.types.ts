@@ -19,9 +19,14 @@ export type Vm = {
   status: VmStatus
   hostname: string
   createdAt: string
-  // Launch URLs. xterm is available on every VM (ttyd:7681); vnc only on
-  // the desktop image (KasmVNC:6901).
+  // Launch URLs — all path-based on the console hostname so they share
+  // its (browser-trusted) cert. The HTTPRoute's URLRewrite strips the
+  // prefix; the upstream sees the request at `/`.
+  //   xtermUrl: ttyd  (7681) — every VM
+  //   codeUrl : code-server (8080) — every VM
+  //   vncUrl  : KasmVNC (6901) — desktop image only
   xtermUrl: string
+  codeUrl: string
   vncUrl: string | null
 }
 
