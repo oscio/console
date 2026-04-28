@@ -1,9 +1,11 @@
 import { Module } from "@nestjs/common"
-import { VmsController } from "./vms.controller"
+import { OpenFgaModule } from "../openfga/openfga.module"
+import { VmsAuthController, VmsController } from "./vms.controller"
 import { VmsService } from "./vms.service"
 
 @Module({
-  controllers: [VmsController],
+  imports: [OpenFgaModule],
+  controllers: [VmsController, VmsAuthController],
   providers: [VmsService],
 })
 export class VmsModule {}

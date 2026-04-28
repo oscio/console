@@ -1,0 +1,26 @@
+model
+  schema 1.1
+
+type user
+
+type platform
+  relations
+    define console_admin: [user]
+
+type project
+  relations
+    define owner: [user]
+    define editor: [user] or owner
+    define viewer: [user] or editor
+    define can_view: viewer
+    define can_edit: editor
+    define can_admin: owner
+    define can_delete: owner
+
+# VM ownership for the per-VM auth gate. The user who created the VM
+# becomes its owner; only owners can reach
+# https://<vm-slug>-{term,code,vnc}.vm.<domain>.
+type vm
+  relations
+    define owner: [user]
+    define can_access: owner

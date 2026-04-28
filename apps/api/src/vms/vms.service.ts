@@ -6,6 +6,8 @@ import {
   NotFoundException,
 } from "@nestjs/common"
 import { randomBytes } from "node:crypto"
+import { authPool } from "@workspace/auth"
+import { OpenFgaService } from "../openfga/openfga.service"
 import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
 import {
   CreateVmInput,
@@ -67,6 +69,8 @@ function rethrowK8sError(err: unknown, fallback: string): never {
 
 @Injectable()
 export class VmsService {
+  constructor(private readonly fga: OpenFgaService) {}
+
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
@@ -76,6 +80,15 @@ export class VmsService {
     process.env.VM_GATEWAY_NAME ?? "platform-gateway"
   private readonly gatewayNamespace =
     process.env.VM_GATEWAY_NAMESPACE ?? "platform-traefik"
+  // ForwardAuth chain: oauth2-proxy (session) → optional FGA ownership
+  // check. Traefik resolves Middleware refs only within the HTTPRoute's
+  // namespace, so we clone tiny Middlewares into each VM namespace
+  // pointing at these URLs. Empty oauth URL = no auth gate at all.
+  private readonly authForwardUrl = process.env.VM_AUTH_FORWARD_URL ?? ""
+  private readonly authOwnershipUrl =
+    process.env.VM_AUTH_OWNERSHIP_URL ?? ""
+  private readonly authOauthMiddleware = "vm-auth-oauth"
+  private readonly authFgaMiddleware = "vm-auth-fga"
 
   imageFor(type: VmImageType): string {
     const ref = type === "desktop" ? this.imageDesktop : this.imageBase
@@ -124,6 +137,24 @@ export class VmsService {
     const storage = input.storageSize ?? "10Gi"
 
     await this.ensureNamespace(ns, ownerId)
+
+    // Per-namespace ForwardAuth Middlewares, cloned once per VM ns.
+    // First gate is oauth2-proxy (session); second is the optional
+    // console-api ownership check. Skipped when no oauth URL is set.
+    if (this.authForwardUrl) {
+      await this.ensureAuthMiddleware(
+        ns,
+        this.authOauthMiddleware,
+        this.authForwardUrl,
+      )
+    }
+    if (this.authOwnershipUrl) {
+      await this.ensureAuthMiddleware(
+        ns,
+        this.authFgaMiddleware,
+        this.authOwnershipUrl,
+      )
+    }
 
     // Create the headless Service first so the StatefulSet's stable DNS
     // (`<slug>-0.<svc>.<ns>.svc.cluster.local`) resolves the moment the
@@ -247,10 +278,37 @@ export class VmsService {
       await this.ensureHttpRoute(ns, slug, "vnc", 6901)
     }
 
+    // Stamp the OpenFGA ownership tuple. This is what the per-VM
+    // ForwardAuth check (/vms/auth) reads to decide whether a logged-
+    // in user can reach this VM's URLs.
+    await this.fga.grantVmOwner(slug, ownerId).catch((err) => {
+      // Don't roll back the K8s resources — owner can still delete via
+      // the slug from the API. Log and surface the failure.
+      throw new Error(
+        `VM ${slug} created but FGA owner tuple write failed: ${(err as Error).message}`,
+      )
+    })
+
     const vms = await this.listForOwner(ownerId)
     const created = vms.find((v) => v.slug === slug)
     if (!created) throw new NotFoundException("VM created but not found.")
     return created
+  }
+
+  // Used by the ForwardAuth endpoint /vms/auth. Accepts the email that
+  // oauth2-proxy forwards as `X-Auth-Request-Email`, looks up the
+  // better-auth user id (FGA tuples are written with that id), and
+  // checks ownership against the slug derived from the request host.
+  async canAccessByEmail(email: string, slug: string): Promise<boolean> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug || !email) return false
+    const { rows } = await authPool.query<{ id: string }>(
+      `SELECT id FROM "user" WHERE lower(email) = lower($1) LIMIT 1`,
+      [email],
+    )
+    const userId = rows[0]?.id
+    if (!userId) return false
+    return this.fga.canAccessVm(userId, cleanSlug)
   }
 
   // Delete by slug — the random ID we own. The display name is not
@@ -284,6 +342,13 @@ export class VmsService {
         () => undefined,
       )
     }
+    // Drop every owner tuple. listVmOwners covers the case where the
+    // VM was shared with multiple users (no UI for this yet, but the
+    // FGA model already supports it).
+    const owners = await this.fga.listVmOwners(cleanSlug).catch(() => [])
+    for (const u of owners) {
+      await this.fga.revokeVmOwner(cleanSlug, u).catch(() => undefined)
+    }
   }
 
   // One HTTPRoute per service hostname, e.g. <slug>-term.vm.<domain>
@@ -298,6 +363,16 @@ export class VmsService {
     const custom = k8sCustom()
     const name = `${slug}-${svc}`
     const hostname = `${slug}-${svc}.${this.vmDomain}`
+    // ExtensionRef chain: oauth2-proxy first (sets X-Auth-Request-*
+    // headers), then console-api ownership check uses those headers.
+    // Both Middlewares are cloned into this ns by ensureAuthMiddleware.
+    const filterFor = (name: string) => ({
+      type: "ExtensionRef",
+      extensionRef: { group: "traefik.io", kind: "Middleware", name },
+    })
+    const authFilters: Array<ReturnType<typeof filterFor>> = []
+    if (this.authForwardUrl) authFilters.push(filterFor(this.authOauthMiddleware))
+    if (this.authOwnershipUrl) authFilters.push(filterFor(this.authFgaMiddleware))
     const body = {
       apiVersion: "gateway.networking.k8s.io/v1",
       kind: "HTTPRoute",
@@ -319,6 +394,7 @@ export class VmsService {
         rules: [
           {
             matches: [{ path: { type: "PathPrefix", value: "/" } }],
+            filters: authFilters,
             backendRefs: [
               { group: "", kind: "Service", name: slug, port },
             ],
@@ -339,6 +415,51 @@ export class VmsService {
         ?? (err as { statusCode?: number }).statusCode
       if (code === 409) return // already exists, fine
       rethrowK8sError(err, `Failed to create HTTPRoute "${name}"`)
+    }
+  }
+
+  // Drops a `Middleware` (Traefik) in the given namespace pointing at
+  // a forwardAuth target. Idempotent — 409 = already exists.
+  private async ensureAuthMiddleware(
+    ns: string,
+    name: string,
+    address: string,
+  ): Promise<void> {
+    const custom = k8sCustom()
+    const body = {
+      apiVersion: "traefik.io/v1alpha1",
+      kind: "Middleware",
+      metadata: {
+        name,
+        namespace: ns,
+        labels: { [VM_LABEL]: VM_LABEL_VALUE },
+      },
+      spec: {
+        forwardAuth: {
+          address,
+          trustForwardHeader: true,
+          authResponseHeaders: [
+            "X-Auth-Request-User",
+            "X-Auth-Request-Email",
+            "X-Auth-Request-Groups",
+            "Authorization",
+          ],
+        },
+      },
+    }
+    try {
+      await custom.createNamespacedCustomObject({
+        group: "traefik.io",
+        version: "v1alpha1",
+        namespace: ns,
+        plural: "middlewares",
+        body,
+      })
+    } catch (err: unknown) {
+      const code = (err as { code?: number; statusCode?: number }).code
+        ?? (err as { statusCode?: number }).statusCode
+      if (code === 409) return
+      rethrowK8sError(err, `Failed to create auth Middleware "${name}" in ${ns}`)
     }
   }
 

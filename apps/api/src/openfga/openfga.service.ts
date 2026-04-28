@@ -115,6 +115,37 @@ export class OpenFgaService implements OnModuleInit {
     }
   }
 
+  // ---- VM ownership ------------------------------------------------------
+  // Per `openfga/model.fga`, type `vm` has a single `owner: [user]`
+  // relation and `can_access` resolves to owner. The per-VM auth
+  // gate (Traefik forwardAuth → /vms/auth) calls canAccessVm to
+  // decide whether a logged-in user is allowed near the workload.
+
+  async grantVmOwner(slug: string, userId: string): Promise<void> {
+    await this.write([
+      { user: userKey(userId), relation: "owner", object: vmKey(slug) },
+    ])
+  }
+
+  async revokeVmOwner(slug: string, userId: string): Promise<void> {
+    await this.deleteTuples([
+      { user: userKey(userId), relation: "owner", object: vmKey(slug) },
+    ])
+  }
+
+  // List every owner of a VM. Used so revoke/delete can tear down
+  // the tuple without requiring the caller to know the owner.
+  async listVmOwners(slug: string): Promise<string[]> {
+    const subjects = await this.listSubjects("owner", vmKey(slug))
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async canAccessVm(userId: string, slug: string): Promise<boolean> {
+    return this.check(userKey(userId), "can_access", vmKey(slug))
+  }
+
   // -------------------------------------------------------------------------
 
   private async post(path: string, body: unknown): Promise<any> {
@@ -133,6 +164,10 @@ export class OpenFgaService implements OnModuleInit {
 
 export function userKey(userId: string): string {
   return `user:${userId}`
+}
+
+export function vmKey(slug: string): string {
+  return `vm:${slug}`
 }
 
 async function readDevEnvFile(path: string): Promise<Record<string, string>> {
