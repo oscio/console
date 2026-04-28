@@ -13,6 +13,7 @@ import {
   CreateVmInput,
   Vm,
   VM_AGENT_TYPE_LABEL,
+  VM_DEFAULTS,
   VM_DISPLAY_NAME_ANNOTATION,
   VM_IMAGE_TYPE_LABEL,
   VM_LABEL,
@@ -140,7 +141,9 @@ export class VmsService {
     const slug = randomSlug()
     const ns = ownerNamespace(ownerId)
     const image = this.imageFor(input.imageType)
-    const storage = input.storageSize ?? "10Gi"
+    const storage = input.storageSize ?? VM_DEFAULTS.storage
+    const cpu = input.cpuRequest ?? VM_DEFAULTS.cpu
+    const memory = input.memoryRequest ?? VM_DEFAULTS.memory
 
     await this.ensureNamespace(ns, ownerId)
 
@@ -223,6 +226,12 @@ export class VmsService {
                     volumeMounts: [
                       { name: "data", mountPath: "/home/agent" },
                     ],
+                    // requests = limits → guaranteed QoS, the pod
+                    // gets exactly what was asked for, no bursting.
+                    resources: {
+                      requests: { cpu, memory },
+                      limits: { cpu, memory },
+                    },
                   },
                   {
                     // Docker-in-Docker sidecar — listens plaintext on

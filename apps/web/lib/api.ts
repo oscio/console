@@ -116,12 +116,22 @@ export async function fetchVms(cookieHeader: string): Promise<Vm[] | null> {
   return (await res.json()) as Vm[]
 }
 
+// Defaults match VM_DEFAULTS on the api. Surfaced as the slider
+// recommendation in the create modal — keep these in sync.
+export const VM_DEFAULTS = {
+  cpu: "2",
+  memory: "4Gi",
+  storage: "20Gi",
+} as const
+
 export async function createVm(
   cookieHeader: string,
   input: {
     name: string
     imageType: VmImageType
     agentType: VmAgentType
+    cpuRequest?: string
+    memoryRequest?: string
     storageSize?: string
   },
 ): Promise<Vm> {

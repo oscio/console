@@ -27,10 +27,19 @@ async function createVmAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim()
   const imageType = String(formData.get("imageType") ?? "base") as VmImageType
   const agentType = String(formData.get("agentType") ?? "none") as VmAgentType
-  const storageSize = String(formData.get("storageSize") ?? "10Gi").trim()
+  const cpuRequest = String(formData.get("cpuRequest") ?? "").trim() || undefined
+  const memoryRequest = String(formData.get("memoryRequest") ?? "").trim() || undefined
+  const storageSize = String(formData.get("storageSize") ?? "").trim() || undefined
   if (!name) return { error: "name is required" }
   try {
-    await createVm(cookieHeader, { name, imageType, agentType, storageSize })
+    await createVm(cookieHeader, {
+      name,
+      imageType,
+      agentType,
+      cpuRequest,
+      memoryRequest,
+      storageSize,
+    })
   } catch (err) {
     return { error: (err as Error).message }
   }

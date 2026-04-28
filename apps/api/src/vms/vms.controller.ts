@@ -103,6 +103,8 @@ export class VmsController {
       name,
       imageType,
       agentType,
+      cpuRequest: body.cpuRequest,
+      memoryRequest: body.memoryRequest,
       storageSize: body.storageSize,
     })
   }

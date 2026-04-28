@@ -38,8 +38,22 @@ export type CreateVmInput = {
   name: string
   imageType: VmImageType
   agentType: VmAgentType
+  // K8s quantity strings — `cpuRequest=2`, `memoryRequest=4Gi`,
+  // `storageSize=20Gi`. The service treats requests = limits for now
+  // so the pod gets exactly what was asked for, no bursting.
+  cpuRequest?: string
+  memoryRequest?: string
   storageSize?: string
 }
+
+// Defaults shown in the UI as "Recommended" + applied when caller
+// omits the field. Sized for a 1-user dev workspace; bumpable on the
+// dial.
+export const VM_DEFAULTS = {
+  cpu: "2",
+  memory: "4Gi",
+  storage: "20Gi",
+} as const
 
 // VM-derived label/annotation keys. Centralized so list/create stay in
 // sync — list filters by VM_LABEL=true, create stamps the same.
