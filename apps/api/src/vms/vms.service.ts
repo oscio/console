@@ -70,10 +70,6 @@ export class VmsService {
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
-  // Console hostname carries every VM's launch URLs as `/vms/<slug>/...`
-  // so they reuse the existing trusted cert (no per-host CA-trust dance).
-  private readonly consoleHostname =
-    process.env.CONSOLE_HOSTNAME ?? "console.localhost"
   // Gateway API parent ref for per-VM HTTPRoutes. Defaults match the
   // dev cluster's `platform-gateway` in `platform-traefik`.
   private readonly gatewayName =
@@ -179,12 +175,6 @@ export class VmsService {
                       { name: "VM_SLUG", value: slug },
                       { name: "VM_NAME", value: displayName },
                       { name: "VM_AGENT", value: input.agentType },
-                      // Sub-path config picked up by the agent-sandbox
-                      // image's supervisord (ttyd `-b`, KasmVNC
-                      // `basepath`). code-server doesn't need the hint —
-                      // strip-prefix at the Gateway is enough.
-                      { name: "TTYD_BASE_PATH", value: `/vms/${slug}/term` },
-                      { name: "KASM_BASE_PATH", value: `/vms/${slug}/vnc` },
                     ],
                     volumeMounts: [
                       { name: "data", mountPath: "/home/agent" },
@@ -217,11 +207,16 @@ export class VmsService {
       rethrowK8sError(err, `Failed to create VM "${slug}"`)
     }
 
-    // One HTTPRoute on the console hostname with three path-based rules
-    // (term/vnc/code) → backend ports. URLRewrite strips the
-    // `/vms/<slug>/<svc>` prefix so each upstream sees `/`. Gateway
-    // listener allows routes from all namespaces.
-    await this.ensureHttpRoute(ns, slug, input.imageType)
+    // Per-host HTTPRoutes — one hostname per service, all under the
+    // `*.vm.<domain>` wildcard listener. Each upstream serves at `/`,
+    // which is what code-server / ttyd / KasmVNC expect (no sub-path
+    // gymnastics, WebSockets work as-is). The user trusts the platform
+    // root CA once at the OS level and every host's cert is accepted.
+    await this.ensureHttpRoute(ns, slug, "term", 7681)
+    await this.ensureHttpRoute(ns, slug, "code", 8080)
+    if (input.imageType === "desktop") {
+      await this.ensureHttpRoute(ns, slug, "vnc", 6901)
+    }
 
     const vms = await this.listForOwner(ownerId)
     const created = vms.find((v) => v.slug === slug)
@@ -254,47 +249,36 @@ export class VmsService {
         labelSelector: `agent-platform/vm-slug=${cleanSlug}`,
       })
       .catch(() => undefined)
-    await this.deleteHttpRoute(ns, cleanSlug).catch(() => undefined)
+    // Tear down per-service HTTPRoutes — term/code always, vnc when present.
+    for (const svc of ["term", "code", "vnc"]) {
+      await this.deleteHttpRoute(ns, `${cleanSlug}-${svc}`).catch(
+        () => undefined,
+      )
+    }
   }
 
-  // One HTTPRoute per VM, named after the slug, with path rules for
-  // term/code (every VM) and vnc (desktop only). URLRewrite strips the
-  // `/vms/<slug>/<svc>` prefix so each upstream sees the request at `/`.
+  // One HTTPRoute per service hostname, e.g. <slug>-term.vm.<domain>
+  // → Service:<port>. Each upstream serves at `/` so WebSocket asset
+  // URLs work without rewriting.
   private async ensureHttpRoute(
     ns: string,
     slug: string,
-    imageType: VmImageType,
+    svc: "term" | "code" | "vnc",
+    port: number,
   ): Promise<void> {
     const custom = k8sCustom()
-    const rule = (svc: string, port: number) => ({
-      matches: [
-        { path: { type: "PathPrefix", value: `/vms/${slug}/${svc}` } },
-      ],
-      filters: [
-        {
-          type: "URLRewrite",
-          urlRewrite: {
-            path: { type: "ReplacePrefixMatch", replacePrefixMatch: "/" },
-          },
-        },
-      ],
-      backendRefs: [
-        { group: "", kind: "Service", name: slug, port },
-      ],
-    })
-    const rules = [rule("term", 7681), rule("code", 8080)]
-    if (imageType === "desktop") rules.push(rule("vnc", 6901))
-
+    const name = `${slug}-${svc}`
+    const hostname = `${slug}-${svc}.${this.vmDomain}`
     const body = {
       apiVersion: "gateway.networking.k8s.io/v1",
       kind: "HTTPRoute",
       metadata: {
-        name: slug,
+        name,
         namespace: ns,
         labels: { [VM_LABEL]: VM_LABEL_VALUE },
       },
       spec: {
-        hostnames: [this.consoleHostname],
+        hostnames: [hostname],
         parentRefs: [
           {
             group: "gateway.networking.k8s.io",
@@ -303,7 +287,14 @@ export class VmsService {
             namespace: this.gatewayNamespace,
           },
         ],
-        rules,
+        rules: [
+          {
+            matches: [{ path: { type: "PathPrefix", value: "/" } }],
+            backendRefs: [
+              { group: "", kind: "Service", name: slug, port },
+            ],
+          },
+        ],
       },
     }
     try {
@@ -318,7 +309,7 @@ export class VmsService {
       const code = (err as { code?: number; statusCode?: number }).code
         ?? (err as { statusCode?: number }).statusCode
       if (code === 409) return // already exists, fine
-      rethrowK8sError(err, `Failed to create HTTPRoute "${slug}"`)
+      rethrowK8sError(err, `Failed to create HTTPRoute "${name}"`)
     }
   }
 
@@ -451,13 +442,15 @@ export class VmsService {
       status,
       hostname,
       createdAt,
-      // Path-based on the console hostname → reuses its trusted cert.
-      // The HTTPRoute does the URL rewrite to drop the prefix.
-      xtermUrl: `https://${this.consoleHostname}/vms/${slug}/term/`,
-      codeUrl: `https://${this.consoleHostname}/vms/${slug}/code/`,
+      // Per-host URLs under the `*.vm.<domain>` wildcard listener. Each
+      // upstream serves at `/`, so WebSockets and absolute asset URLs
+      // work as-is. Browsers need the platform root CA trusted once
+      // (sudo security add-trusted-cert ...).
+      xtermUrl: `https://${slug}-term.${this.vmDomain}`,
+      codeUrl: `https://${slug}-code.${this.vmDomain}`,
       vncUrl:
         imageType === "desktop"
-          ? `https://${this.consoleHostname}/vms/${slug}/vnc/`
+          ? `https://${slug}-vnc.${this.vmDomain}`
           : null,
     }
   }
