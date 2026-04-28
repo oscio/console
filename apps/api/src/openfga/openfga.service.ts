@@ -146,6 +146,59 @@ export class OpenFgaService implements OnModuleInit {
     return this.check(userKey(userId), "can_access", vmKey(slug))
   }
 
+  // ---- Agent ownership ---------------------------------------------------
+  // Mirrors the VM pattern. `type agent` has the same `owner` /
+  // `can_access` shape so the per-agent forwardAuth gate (Traefik
+  // → /agents/auth) reuses the same check semantics as VMs.
+
+  async grantAgentOwner(slug: string, userId: string): Promise<void> {
+    await this.write([
+      { user: userKey(userId), relation: "owner", object: agentKey(slug) },
+    ])
+  }
+
+  async revokeAgentOwner(slug: string, userId: string): Promise<void> {
+    await this.deleteTuples([
+      { user: userKey(userId), relation: "owner", object: agentKey(slug) },
+    ])
+  }
+
+  async listAgentOwners(slug: string): Promise<string[]> {
+    const subjects = await this.listSubjects("owner", agentKey(slug))
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async canAccessAgent(userId: string, slug: string): Promise<boolean> {
+    return this.check(userKey(userId), "can_access", agentKey(slug))
+  }
+
+  // ---- Volume ownership --------------------------------------------------
+
+  async grantVolumeOwner(slug: string, userId: string): Promise<void> {
+    await this.write([
+      { user: userKey(userId), relation: "owner", object: volumeKey(slug) },
+    ])
+  }
+
+  async revokeVolumeOwner(slug: string, userId: string): Promise<void> {
+    await this.deleteTuples([
+      { user: userKey(userId), relation: "owner", object: volumeKey(slug) },
+    ])
+  }
+
+  async listVolumeOwners(slug: string): Promise<string[]> {
+    const subjects = await this.listSubjects("owner", volumeKey(slug))
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async canAccessVolume(userId: string, slug: string): Promise<boolean> {
+    return this.check(userKey(userId), "can_access", volumeKey(slug))
+  }
+
   // -------------------------------------------------------------------------
 
   private async post(path: string, body: unknown): Promise<any> {
@@ -168,6 +221,14 @@ export function userKey(userId: string): string {
 
 export function vmKey(slug: string): string {
   return `vm:${slug}`
+}
+
+export function agentKey(slug: string): string {
+  return `agent:${slug}`
+}
+
+export function volumeKey(slug: string): string {
+  return `volume:${slug}`
 }
 
 async function readDevEnvFile(path: string): Promise<Record<string, string>> {

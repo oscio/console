@@ -99,13 +99,22 @@ export class VmsController {
     if (!ALLOWED_AGENT.has(agentType)) {
       throw new BadRequestException("agentType must be 'hermes' or 'none'")
     }
+    const volumeMode = (body.volumeMode ?? "new") as "new" | "attach" | "none"
+    if (!new Set(["new", "attach", "none"]).has(volumeMode)) {
+      throw new BadRequestException("volumeMode must be 'new', 'attach', or 'none'")
+    }
     return this.vms.create(session.user.id, {
       name,
       imageType,
       agentType,
       cpuRequest: body.cpuRequest,
       memoryRequest: body.memoryRequest,
-      storageSize: body.storageSize,
+      volumeMode,
+      volumeName: body.volumeName,
+      volumeSizeGi:
+        body.volumeSizeGi != null ? Number(body.volumeSizeGi) : undefined,
+      persistVolumeOnDelete: !!body.persistVolumeOnDelete,
+      volumeSlug: body.volumeSlug,
     })
   }
 

@@ -8,17 +8,22 @@ import {
 import { randomBytes } from "node:crypto"
 import { authPool } from "@workspace/auth"
 import { OpenFgaService } from "../openfga/openfga.service"
+import { VolumesService } from "../volumes/volumes.service"
 import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
 import {
   CreateVmInput,
   Vm,
   VM_AGENT_TYPE_LABEL,
+  VM_DATA_MOUNT_PATH,
+  VM_DATA_VOLUME_NAME,
   VM_DEFAULTS,
   VM_DISPLAY_NAME_ANNOTATION,
   VM_IMAGE_TYPE_LABEL,
   VM_LABEL,
   VM_LABEL_VALUE,
   VM_OWNER_LABEL,
+  VM_VOLUME_PERSIST_ANNOTATION,
+  VM_VOLUME_SLUG_ANNOTATION,
   VmAgentType,
   VmImageType,
   VmStatus,
@@ -70,7 +75,10 @@ function rethrowK8sError(err: unknown, fallback: string): never {
 
 @Injectable()
 export class VmsService {
-  constructor(private readonly fga: OpenFgaService) {}
+  constructor(
+    private readonly fga: OpenFgaService,
+    private readonly volumes: VolumesService,
+  ) {}
 
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
@@ -141,11 +149,39 @@ export class VmsService {
     const slug = randomSlug()
     const ns = ownerNamespace(ownerId)
     const image = this.imageFor(input.imageType)
-    const storage = input.storageSize ?? VM_DEFAULTS.storage
     const cpu = input.cpuRequest ?? VM_DEFAULTS.cpu
     const memory = input.memoryRequest ?? VM_DEFAULTS.memory
 
     await this.ensureNamespace(ns, ownerId)
+
+    // Resolve the data volume per requested mode. We don't use
+    // StatefulSet volumeClaimTemplates anymore — every PVC is a
+    // standalone Volume so it can outlive the VM (persist mode) or
+    // be reattached to a different VM (attach mode).
+    const persist = !!input.persistVolumeOnDelete && input.volumeMode === "new"
+    let volumeSlug: string | null = null
+    if (input.volumeMode === "new") {
+      const created = await this.volumes.create(ownerId, {
+        name: input.volumeName?.trim() || `${displayName} volume`,
+        sizeGi: input.volumeSizeGi ?? VM_DEFAULTS.volumeSizeGi,
+      })
+      volumeSlug = created.slug
+    } else if (input.volumeMode === "attach") {
+      if (!input.volumeSlug) {
+        throw new BadRequestException(
+          "volumeSlug is required when volumeMode='attach'",
+        )
+      }
+      const owned = await this.volumes.listForOwner(ownerId)
+      const v = owned.find((x) => x.slug === input.volumeSlug)
+      if (!v) throw new BadRequestException(`Volume "${input.volumeSlug}" not found.`)
+      if (v.boundTo) {
+        throw new ConflictException(
+          `Volume "${v.slug}" is already bound to VM "${v.boundTo}".`,
+        )
+      }
+      volumeSlug = v.slug
+    }
 
     // Per-namespace Middlewares cloned into the VM ns:
     //  1. oauth-auth → forwardAuth → oauth2-proxy /oauth2/auth (session)
@@ -184,7 +220,11 @@ export class VmsService {
             name: slug,
             namespace: ns,
             labels: this.vmLabels(ownerId, input.imageType, input.agentType),
-            annotations: { [VM_DISPLAY_NAME_ANNOTATION]: displayName },
+            annotations: {
+              [VM_DISPLAY_NAME_ANNOTATION]: displayName,
+              ...(volumeSlug ? { [VM_VOLUME_SLUG_ANNOTATION]: volumeSlug } : {}),
+              [VM_VOLUME_PERSIST_ANNOTATION]: persist ? "true" : "false",
+            },
           },
           spec: {
             serviceName: slug,
@@ -202,9 +242,6 @@ export class VmsService {
                   {
                     name: "vm",
                     image,
-                    // Ports exposed by the agent-sandbox image:
-                    //   8080 = code-server, 7681 = ttyd (xterm),
-                    //   8787 = hermes-webui, 6901 = KasmVNC (desktop).
                     ports: [
                       { name: "http", containerPort: 8080 },
                       { name: "xterm", containerPort: 7681 },
@@ -218,58 +255,45 @@ export class VmsService {
                       { name: "VM_SLUG", value: slug },
                       { name: "VM_NAME", value: displayName },
                       { name: "VM_AGENT", value: input.agentType },
-                      // Point `docker` (CLI) at the DinD sidecar over
-                      // the shared pod-localhost. Same pattern as the
-                      // forgejo-runner pod.
                       { name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" },
                     ],
-                    volumeMounts: [
-                      { name: "data", mountPath: "/home/agent" },
-                    ],
-                    // requests = limits → guaranteed QoS, the pod
-                    // gets exactly what was asked for, no bursting.
+                    volumeMounts: volumeSlug
+                      ? [{ name: VM_DATA_VOLUME_NAME, mountPath: VM_DATA_MOUNT_PATH }]
+                      : [],
                     resources: {
                       requests: { cpu, memory },
                       limits: { cpu, memory },
                     },
                   },
                   {
-                    // Docker-in-Docker sidecar — listens plaintext on
-                    // 127.0.0.1:2375 (pod network namespace isolates).
-                    // --mtu=1450 matches the Flannel/k3s overlay so
-                    // build-container TLS handshakes don't black-hole
-                    // (same fix we applied to forgejo-runner).
                     name: "dind",
                     image: "docker:24-dind",
                     args: ["--mtu=1450"],
-                    env: [
-                      // Empty DOCKER_TLS_CERTDIR → daemon binds plain
-                      // tcp://0.0.0.0:2375 (pod network is private).
-                      { name: "DOCKER_TLS_CERTDIR", value: "" },
-                    ],
-                    securityContext: {
-                      privileged: true,
-                      runAsUser: 0,
-                    },
-                    volumeMounts: [
-                      // /var/lib/docker on the VM's PVC so images +
-                      // build cache survive pod restarts. Sub-path
-                      // keeps it separate from the agent's /home.
-                      { name: "data", mountPath: "/var/lib/docker", subPath: "docker" },
-                    ],
+                    env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }],
+                    securityContext: { privileged: true, runAsUser: 0 },
+                    volumeMounts: volumeSlug
+                      ? [
+                          {
+                            name: VM_DATA_VOLUME_NAME,
+                            mountPath: "/var/lib/docker",
+                            subPath: "docker",
+                          },
+                        ]
+                      : [],
                   },
                 ],
+                // PVC-backed `data` volume when one is bound; absent
+                // for volumeMode=none (container ephemeral fs only).
+                volumes: volumeSlug
+                  ? [
+                      {
+                        name: VM_DATA_VOLUME_NAME,
+                        persistentVolumeClaim: { claimName: volumeSlug },
+                      },
+                    ]
+                  : [],
               },
             },
-            volumeClaimTemplates: [
-              {
-                metadata: { name: "data" },
-                spec: {
-                  accessModes: ["ReadWriteOnce"],
-                  resources: { requests: { storage } },
-                },
-              },
-            ],
           },
         },
       })
@@ -285,11 +309,13 @@ export class VmsService {
       rethrowK8sError(err, `Failed to create VM "${slug}"`)
     }
 
-    // Per-host HTTPRoutes — one hostname per service, all under the
-    // `*.vm.<domain>` wildcard listener. Each upstream serves at `/`,
-    // which is what code-server / ttyd / KasmVNC expect (no sub-path
-    // gymnastics, WebSockets work as-is). The user trusts the platform
-    // root CA once at the OS level and every host's cert is accepted.
+    // Stamp the bound-to label on the volume so /volumes shows it
+    // as bound (and the "attach" picker filters it out).
+    if (volumeSlug) {
+      await this.volumes.bindToVm(ownerId, volumeSlug, slug)
+    }
+
+    // Per-host HTTPRoutes — one hostname per service.
     await this.ensureHttpRoute(ns, slug, "term", 7681)
     await this.ensureHttpRoute(ns, slug, "code", 8080)
     if (input.imageType === "desktop") {
@@ -337,6 +363,24 @@ export class VmsService {
     const ns = ownerNamespace(ownerId)
     const apps = k8sApps()
     const core = k8sCore()
+
+    // Read the StatefulSet's annotations BEFORE we delete it — they
+    // tell us whether the bound volume should be persisted or
+    // cleaned up. Reading after delete would race the K8s GC.
+    let boundVolume: string | null = null
+    let persistVolume = false
+    try {
+      const sts = await apps.readNamespacedStatefulSet({
+        name: cleanSlug,
+        namespace: ns,
+      })
+      const annotations = sts.metadata?.annotations ?? {}
+      boundVolume = annotations[VM_VOLUME_SLUG_ANNOTATION] ?? null
+      persistVolume = annotations[VM_VOLUME_PERSIST_ANNOTATION] === "true"
+    } catch {
+      // 404 / other → fall through, no volume bookkeeping needed.
+    }
+
     await apps
       .deleteNamespacedStatefulSet({ name: cleanSlug, namespace: ns })
       .catch((err: { code?: number; statusCode?: number }) => {
@@ -346,14 +390,17 @@ export class VmsService {
     await core
       .deleteNamespacedService({ name: cleanSlug, namespace: ns })
       .catch(() => undefined)
-    // PVCs created from volumeClaimTemplates aren't garbage-collected on
-    // StatefulSet delete; remove them so storage isn't leaked.
-    await core
-      .deleteCollectionNamespacedPersistentVolumeClaim({
-        namespace: ns,
-        labelSelector: `agent-platform/vm-slug=${cleanSlug}`,
-      })
-      .catch(() => undefined)
+
+    // Volume cleanup: persist=true → unbind only (the volume shows
+    // up under /volumes for re-attach). persist=false → delete the
+    // PVC entirely. volumeMode=none → no volume, nothing to do.
+    if (boundVolume) {
+      if (persistVolume) {
+        await this.volumes.unbindFromVm(ownerId, boundVolume)
+      } else {
+        await this.volumes.delete(ownerId, boundVolume).catch(() => undefined)
+      }
+    }
     // Tear down per-service HTTPRoutes — term/code always, vnc when present.
     for (const svc of ["term", "code", "vnc"]) {
       await this.deleteHttpRoute(ns, `${cleanSlug}-${svc}`).catch(

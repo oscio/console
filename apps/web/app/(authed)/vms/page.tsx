@@ -15,9 +15,11 @@ import {
   createVm,
   deleteVm,
   fetchVms,
+  fetchVolumes,
   type VmAgentType,
   type VmImageType,
   type VmStatus,
+  type VmVolumeMode,
 } from "@/lib/api"
 import { DeleteVmButton, NewVmForm } from "./new-vm-form"
 
@@ -29,7 +31,11 @@ async function createVmAction(formData: FormData) {
   const agentType = String(formData.get("agentType") ?? "none") as VmAgentType
   const cpuRequest = String(formData.get("cpuRequest") ?? "").trim() || undefined
   const memoryRequest = String(formData.get("memoryRequest") ?? "").trim() || undefined
-  const storageSize = String(formData.get("storageSize") ?? "").trim() || undefined
+  const volumeMode = String(formData.get("volumeMode") ?? "new") as VmVolumeMode
+  const volumeSizeGiRaw = String(formData.get("volumeSizeGi") ?? "")
+  const volumeSizeGi = volumeSizeGiRaw ? Number(volumeSizeGiRaw) : undefined
+  const persistVolumeOnDelete = formData.get("persistVolumeOnDelete") === "true"
+  const volumeSlug = String(formData.get("volumeSlug") ?? "").trim() || undefined
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -38,12 +44,16 @@ async function createVmAction(formData: FormData) {
       agentType,
       cpuRequest,
       memoryRequest,
-      storageSize,
+      volumeMode,
+      volumeSizeGi,
+      persistVolumeOnDelete,
+      volumeSlug,
     })
   } catch (err) {
     return { error: (err as Error).message }
   }
   revalidatePath("/vms")
+  revalidatePath("/volumes")
 }
 
 async function deleteVmAction(formData: FormData) {
@@ -57,7 +67,11 @@ async function deleteVmAction(formData: FormData) {
 
 export default async function VmsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
-  const vms = await fetchVms(cookieHeader)
+  const [vms, volumes] = await Promise.all([
+    fetchVms(cookieHeader),
+    fetchVolumes(cookieHeader),
+  ])
+  const freeVolumes = (volumes ?? []).filter((v) => !v.boundTo)
 
   return (
     <div className="space-y-6">
@@ -68,7 +82,9 @@ export default async function VmsPage() {
             Workspace pods scoped to your account, served by the K8s API.
           </p>
         </div>
-        {vms !== null && <NewVmForm action={createVmAction} />}
+        {vms !== null && (
+          <NewVmForm action={createVmAction} freeVolumes={freeVolumes} />
+        )}
       </div>
 
       {vms === null ? (

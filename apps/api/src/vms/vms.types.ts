@@ -34,16 +34,30 @@ export type Vm = {
   vncUrl: string | null
 }
 
+// Volume attach mode at VM-create time:
+//   "new"    → provision a fresh PVC + bind it
+//   "attach" → bind to an existing free PVC (volumeSlug required)
+//   "none"   → no PVC, ephemeral container fs only
+export type VmVolumeMode = "new" | "attach" | "none"
+
 export type CreateVmInput = {
   name: string
   imageType: VmImageType
   agentType: VmAgentType
-  // K8s quantity strings — `cpuRequest=2`, `memoryRequest=4Gi`,
-  // `storageSize=20Gi`. The service treats requests = limits for now
-  // so the pod gets exactly what was asked for, no bursting.
   cpuRequest?: string
   memoryRequest?: string
-  storageSize?: string
+
+  // Volume attachment.
+  volumeMode: VmVolumeMode
+  // For "new": display name + size. Optional volumeName falls back
+  // to "<vm-display-name> volume" if omitted.
+  volumeName?: string
+  volumeSizeGi?: number
+  // When true (and mode=new), the PVC outlives VM delete and shows
+  // up under /volumes for re-attach. Default false (delete with VM).
+  persistVolumeOnDelete?: boolean
+  // For "attach": slug of the existing free volume.
+  volumeSlug?: string
 }
 
 // Defaults shown in the UI as "Recommended" + applied when caller
@@ -52,8 +66,18 @@ export type CreateVmInput = {
 export const VM_DEFAULTS = {
   cpu: "2",
   memory: "4Gi",
-  storage: "20Gi",
+  volumeSizeGi: 1,
 } as const
+
+// Pod-spec volume name + mount path used for the VM's data volume.
+// Constants so the service + delete paths agree on what to look for.
+export const VM_DATA_VOLUME_NAME = "data"
+export const VM_DATA_MOUNT_PATH = "/home/agent"
+
+// Annotations the api stamps on the StatefulSet so VM delete knows
+// whether the bound PVC should be cleaned up or left for re-attach.
+export const VM_VOLUME_SLUG_ANNOTATION = "agent-platform/vm-volume-slug"
+export const VM_VOLUME_PERSIST_ANNOTATION = "agent-platform/vm-volume-persist"
 
 // VM-derived label/annotation keys. Centralized so list/create stay in
 // sync — list filters by VM_LABEL=true, create stamps the same.

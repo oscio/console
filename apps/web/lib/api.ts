@@ -121,8 +121,10 @@ export async function fetchVms(cookieHeader: string): Promise<Vm[] | null> {
 export const VM_DEFAULTS = {
   cpu: "2",
   memory: "4Gi",
-  storage: "20Gi",
+  volumeSizeGi: 1,
 } as const
+
+export type VmVolumeMode = "new" | "attach" | "none"
 
 export async function createVm(
   cookieHeader: string,
@@ -132,7 +134,11 @@ export async function createVm(
     agentType: VmAgentType
     cpuRequest?: string
     memoryRequest?: string
-    storageSize?: string
+    volumeMode: VmVolumeMode
+    volumeName?: string
+    volumeSizeGi?: number
+    persistVolumeOnDelete?: boolean
+    volumeSlug?: string
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {
@@ -230,5 +236,74 @@ export async function deleteAgent(
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => "")
     throw new Error(`agents delete failed: ${res.status} ${text}`)
+  }
+}
+
+export type VolumeStatus =
+  | "Available"
+  | "Bound"
+  | "Pending"
+  | "Released"
+  | "Failed"
+  | "Unknown"
+
+export type Volume = {
+  id: string
+  slug: string
+  name: string
+  owner: string
+  namespace: string
+  status: VolumeStatus
+  sizeGi: number
+  // VM slug currently mounting this volume, or null when free.
+  boundTo: string | null
+  createdAt: string
+}
+
+export const VOLUME_DEFAULTS = { sizeGi: 1 } as const
+
+export async function fetchVolumes(
+  cookieHeader: string,
+): Promise<Volume[] | null> {
+  const res = await fetch(`${API_URL}/volumes`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) throw new Error(`volumes list failed: ${res.status}`)
+  return (await res.json()) as Volume[]
+}
+
+export async function createVolume(
+  cookieHeader: string,
+  input: { name: string; sizeGi: number },
+): Promise<Volume> {
+  const res = await fetch(`${API_URL}/volumes`, {
+    method: "POST",
+    headers: {
+      cookie: cookieHeader,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`volumes create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Volume
+}
+
+export async function deleteVolume(
+  cookieHeader: string,
+  slug: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/volumes/${encodeURIComponent(slug)}`,
+    { method: "DELETE", headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`volumes delete failed: ${res.status} ${text}`)
   }
 }

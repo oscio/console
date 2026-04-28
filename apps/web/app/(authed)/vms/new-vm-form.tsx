@@ -23,29 +23,37 @@ import {
   SelectValue,
 } from "@workspace/ui/components/select"
 import { Slider } from "@workspace/ui/components/slider"
-import { VM_DEFAULTS } from "@/lib/api"
+import type { Volume } from "@/lib/api"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
-// Slider configs. CPU in cores (0.5 step), memory + storage in GiB.
-// Recommended values match VM_DEFAULTS — surfaced as a hint and used
-// as the slider's initial position.
 const CPU = { min: 0.5, max: 8, step: 0.5, recommended: 2 }
 const MEM = { min: 1, max: 16, step: 1, recommended: 4 }
-const STORE = { min: 5, max: 100, step: 5, recommended: 20 }
+const VOL = { min: 1, max: 100, step: 0.5, recommended: 1 }
 
-export function NewVmForm({ action }: { action: Action }) {
+type Mode = "new" | "attach" | "none"
+
+export function NewVmForm({
+  action,
+  freeVolumes,
+}: {
+  action: Action
+  // Volumes the current user owns that aren't bound to any VM —
+  // shown in the "Attach existing" dropdown.
+  freeVolumes: Volume[]
+}) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-  // shadcn Select / Slider don't bubble to the underlying form on
-  // submit (Radix Listbox + custom Slider). Mirror values into hidden
-  // inputs so server-action FormData picks them up.
   const [imageType, setImageType] = useState<"base" | "desktop">("base")
   const [cpu, setCpu] = useState(CPU.recommended)
   const [memory, setMemory] = useState(MEM.recommended)
-  const [storage, setStorage] = useState(STORE.recommended)
+
+  const [volumeMode, setVolumeMode] = useState<Mode>("new")
+  const [volumeSize, setVolumeSize] = useState(VOL.recommended)
+  const [persist, setPersist] = useState(false)
+  const [attachSlug, setAttachSlug] = useState<string>(freeVolumes[0]?.slug ?? "")
 
   return (
     <Dialog
@@ -69,7 +77,7 @@ export function NewVmForm({ action }: { action: Action }) {
 
         <form
           id="new-vm-form"
-          className="space-y-5"
+          className="space-y-5 max-h-[70vh] overflow-y-auto pr-1"
           action={(fd) =>
             startTransition(async () => {
               setError(null)
@@ -145,20 +153,90 @@ export function NewVmForm({ action }: { action: Action }) {
             hiddenValue={`${memory}Gi`}
           />
 
-          <SliderField
-            id="vm-storage"
-            label="Storage"
-            value={storage}
-            onChange={setStorage}
-            min={STORE.min}
-            max={STORE.max}
-            step={STORE.step}
-            recommended={STORE.recommended}
-            unit="GiB"
-            hiddenName="storageSize"
-            hiddenValue={`${storage}Gi`}
-            hint="PersistentVolumeClaim size for /home/agent."
-          />
+          {/* Volume mode + sub-fields */}
+          <div className="space-y-3">
+            <Label htmlFor="vm-volume-mode">Volume</Label>
+            <input type="hidden" name="volumeMode" value={volumeMode} />
+            <Select
+              value={volumeMode}
+              onValueChange={(v) => setVolumeMode(v as Mode)}
+            >
+              <SelectTrigger id="vm-volume-mode" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="new">Create new</SelectItem>
+                <SelectItem value="attach" disabled={freeVolumes.length === 0}>
+                  Attach existing
+                  {freeVolumes.length === 0 ? " (none free)" : ""}
+                </SelectItem>
+                <SelectItem value="none">No volume (ephemeral)</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {volumeMode === "new" && (
+              <div className="space-y-3 border-l-2 border-muted pl-3">
+                <SliderField
+                  id="vm-volume-size"
+                  label="Size"
+                  value={volumeSize}
+                  onChange={setVolumeSize}
+                  min={VOL.min}
+                  max={VOL.max}
+                  step={VOL.step}
+                  recommended={VOL.recommended}
+                  unit="GiB"
+                  hiddenName="volumeSizeGi"
+                  hiddenValue={String(volumeSize)}
+                />
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="persistVolumeOnDelete"
+                    value="true"
+                    checked={persist}
+                    onChange={(e) => setPersist(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    Persist on VM delete
+                    <span className="text-muted-foreground ml-2 text-xs">
+                      Default: delete with VM. Persisted volumes show up
+                      under <code>/volumes</code> for re-attach.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {volumeMode === "attach" && (
+              <div className="space-y-1.5 border-l-2 border-muted pl-3">
+                <Label htmlFor="vm-volume-slug" className="text-xs">
+                  Free volume
+                </Label>
+                <input type="hidden" name="volumeSlug" value={attachSlug} />
+                <Select value={attachSlug} onValueChange={setAttachSlug}>
+                  <SelectTrigger id="vm-volume-slug" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {freeVolumes.map((v) => (
+                      <SelectItem key={v.slug} value={v.slug}>
+                        {v.name} ({v.sizeGi} GiB) · {v.slug}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {volumeMode === "none" && (
+              <p className="text-muted-foreground text-xs border-l-2 border-muted pl-3">
+                The pod's <code>/home/agent</code> lives on the container's
+                ephemeral filesystem; everything is lost on pod restart.
+              </p>
+            )}
+          </div>
 
           {error && (
             <p
@@ -184,8 +262,6 @@ export function NewVmForm({ action }: { action: Action }) {
     </Dialog>
   )
 }
-
-void VM_DEFAULTS // imported for parity with the api; sliders source defaults from `*.recommended`.
 
 function Field({
   id,
@@ -219,7 +295,6 @@ function SliderField({
   unit,
   hiddenName,
   hiddenValue,
-  hint,
 }: {
   id: string
   label: string
@@ -232,7 +307,6 @@ function SliderField({
   unit: string
   hiddenName: string
   hiddenValue: string
-  hint?: string
 }) {
   const isRecommended = value === recommended
   return (
@@ -259,9 +333,7 @@ function SliderField({
       />
       <div className="text-muted-foreground flex justify-between text-xs">
         <span>{min} {unit}</span>
-        <span>
-          {hint ? `${hint} ` : ""}Recommended: {recommended} {unit}
-        </span>
+        <span>Recommended: {recommended} {unit}</span>
         <span>{max} {unit}</span>
       </div>
     </div>

@@ -3,8 +3,10 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  Database,
   Gauge,
   IdentificationCard,
+  Robot,
   Stack,
   GearSix,
   SignOut,
@@ -36,6 +38,8 @@ const PRIMARY: NavItem[] = [
 
 const SERVICES: NavItem[] = [
   { href: "/vms", label: "VMs", icon: Stack },
+  { href: "/volumes", label: "Volumes", icon: Database },
+  { href: "/agents", label: "Agents", icon: Robot },
 ]
 
 const FOOTER: NavItem[] = [{ href: "/settings", label: "Settings", icon: GearSix }]
