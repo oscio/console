@@ -75,19 +75,45 @@ export class VolumesService {
     const slugs = await this.fga.listAccessibleVolumes(ownerId)
     if (slugs.length === 0) return []
     const core = k8sCore()
-    const results = await Promise.all(
-      slugs.map((slug) =>
-        core
-          .readNamespacedPersistentVolumeClaim({
-            name: slug,
-            namespace: RESOURCE_NS,
-          })
-          .catch(() => null),
+    const apps = k8sApps()
+    // Pull the live VM set in parallel with PVC reads so we can
+    // detect stale boundTo labels (label set, but the VM no longer
+    // exists). One extra cluster-wide list call per /volumes refresh.
+    const [results, vmRes] = await Promise.all([
+      Promise.all(
+        slugs.map((slug) =>
+          core
+            .readNamespacedPersistentVolumeClaim({
+              name: slug,
+              namespace: RESOURCE_NS,
+            })
+            .catch(() => null),
+        ),
       ),
+      apps
+        .listNamespacedStatefulSet({ namespace: RESOURCE_NS })
+        .catch(() => ({ items: [] })),
+    ])
+    const liveVms = new Set(
+      (vmRes.items ?? [])
+        .map((s) => s.metadata?.name)
+        .filter((n): n is string => !!n),
     )
     return results
       .filter((p): p is NonNullable<typeof p> => p !== null)
-      .map((p) => this.toVolume(p))
+      .map((p) => {
+        const v = this.toVolume(p)
+        if (v.boundTo && !liveVms.has(v.boundTo)) {
+          // Self-heal: drop the stale label so future reads (and
+          // the "attach existing" picker) treat the volume as free.
+          // Fire-and-forget — list call stays read-shaped from the
+          // caller's perspective.
+          void this.unbindFromVm(ownerId, v.slug).catch(() => undefined)
+          v.boundTo = null
+          v.status = v.status === "Bound" ? "Available" : v.status
+        }
+        return v
+      })
   }
 
   async create(ownerId: string, input: CreateVolumeInput): Promise<Volume> {
