@@ -214,7 +214,6 @@ export async function createAgent(
   input: {
     name: string
     agentType: AgentType
-    storageSize?: string
   },
 ): Promise<Agent> {
   const res = await fetch(`${API_URL}/agents`, {

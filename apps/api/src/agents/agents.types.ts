@@ -34,7 +34,6 @@ export type Agent = {
 export type CreateAgentInput = {
   name: string
   agentType: AgentType
-  storageSize?: string
 }
 
 // Agent-derived label/annotation keys. Mirrors VM_* but keyed under

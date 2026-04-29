@@ -91,7 +91,6 @@ export class AgentsController {
     return this.agents.create(session.user.id, {
       name,
       agentType,
-      storageSize: body.storageSize,
     })
   }
 

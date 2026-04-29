@@ -155,11 +155,6 @@ export class AgentsService {
     const slug = randomSlug()
     const ns = RESOURCE_NS
     const image = this.requireImage()
-    // Sessions + config files only — agents don't typically write
-    // large artifacts to disk. 1Gi is generous for the JSONL event
-    // logs and Hermes/Zeroclaw config dirs combined; users can pick
-    // higher in the create form.
-    const storage = input.storageSize ?? "1Gi"
 
     // Grant FGA owner tuple first so a partial create still surfaces
     // in /agents and can be cleaned up via the normal delete flow.
@@ -237,26 +232,15 @@ export class AgentsService {
                       // directly inside this container.
                       { name: "AGENT_USE_SSH_SHIM", value: "false" },
                       // Wrapper's WORKSPACE_DIR — events.jsonl /
-                      // sessions live under this. PVC is mounted
-                      // here so state survives pod restarts.
+                      // sessions live under this. Headless agents
+                      // are intentionally ephemeral: pod restart
+                      // wipes session state. Container fs is fine.
                       { name: "WORKSPACE_DIR", value: "/home/agent/workspace" },
-                    ],
-                    volumeMounts: [
-                      { name: "data", mountPath: "/home/agent/workspace" },
                     ],
                   },
                 ],
               },
             },
-            volumeClaimTemplates: [
-              {
-                metadata: { name: "data" },
-                spec: {
-                  accessModes: ["ReadWriteOnce"],
-                  resources: { requests: { storage } },
-                },
-              },
-            ],
           },
         },
       })
@@ -322,12 +306,6 @@ export class AgentsService {
       })
     await core
       .deleteNamespacedService({ name: cleanSlug, namespace: ns })
-      .catch(() => undefined)
-    await core
-      .deleteCollectionNamespacedPersistentVolumeClaim({
-        namespace: ns,
-        labelSelector: `agent-platform/agent-slug=${cleanSlug}`,
-      })
       .catch(() => undefined)
     await this.deleteHttpRoute(ns, cleanSlug).catch(() => undefined)
     const owners = await this.fga

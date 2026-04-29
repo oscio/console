@@ -45,19 +45,19 @@ export function NewAgentForm({ action }: { action: Action }) {
       <DialogTrigger asChild>
         <Button>Create Agent</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>New Agent</DialogTitle>
           <DialogDescription>
             Provisions a StatefulSet (1 replica) in the shared{" "}
-            <code>resource</code> namespace. Ownership is enforced via
-            OpenFGA.
+            <code>resource</code> namespace. State is ephemeral —
+            sessions are wiped on pod restart.
           </DialogDescription>
         </DialogHeader>
 
         <form
           id="new-agent-form"
-          className="space-y-5 max-h-[70vh] overflow-y-auto overflow-x-hidden px-1"
+          className="space-y-5"
           action={(fd) =>
             startTransition(async () => {
               setError(null)
@@ -103,19 +103,6 @@ export function NewAgentForm({ action }: { action: Action }) {
                 <SelectItem value="zeroclaw">zeroclaw</SelectItem>
               </SelectContent>
             </Select>
-          </Field>
-
-          <Field
-            id="agent-storage"
-            label="Storage"
-            hint="PVC size for /home/agent/workspace — sessions, config, and any files the agent writes. Conversation history is small (text JSONL); 1Gi is plenty for most uses."
-          >
-            <Input
-              id="agent-storage"
-              name="storageSize"
-              defaultValue="1Gi"
-              placeholder="1Gi"
-            />
           </Field>
 
           {error && (

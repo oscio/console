@@ -25,10 +25,9 @@ async function createAgentAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
   const agentType = String(formData.get("agentType") ?? "hermes") as AgentType
-  const storageSize = String(formData.get("storageSize") ?? "1Gi").trim()
   if (!name) return { error: "name is required" }
   try {
-    await createAgent(cookieHeader, { name, agentType, storageSize })
+    await createAgent(cookieHeader, { name, agentType })
   } catch (err) {
     return { error: (err as Error).message }
   }
