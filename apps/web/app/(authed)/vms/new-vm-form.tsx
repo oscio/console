@@ -85,7 +85,7 @@ export function NewVmForm({
 
         <form
           id="new-vm-form"
-          className="space-y-5 max-h-[70vh] overflow-y-auto pr-1"
+          className="space-y-5 max-h-[70vh] overflow-y-auto overflow-x-hidden px-1"
           action={(fd) =>
             startTransition(async () => {
               setError(null)
@@ -399,14 +399,19 @@ function SliderField({
         </span>
       </div>
       <input type="hidden" name={hiddenName} value={hiddenValue} />
-      <Slider
-        id={id}
-        value={[value]}
-        onValueChange={([v]) => onChange(v ?? min)}
-        min={min}
-        max={max}
-        step={step}
-      />
+      {/* The Radix Slider thumb is centered on its value's % — at
+          min/max it half-overflows the track. Inset the thumb track
+          by half its width so it stays within the dialog. */}
+      <div className="px-2.5">
+        <Slider
+          id={id}
+          value={[value]}
+          onValueChange={([v]) => onChange(v ?? min)}
+          min={min}
+          max={max}
+          step={step}
+        />
+      </div>
       <div className="text-muted-foreground flex justify-between text-xs">
         <span>{min} {unit}</span>
         <span>Recommended: {recommended} {unit}</span>
