@@ -334,6 +334,18 @@ export class VmsService {
       await this.ensureHttpRoute(ns, slug, "vnc", 6901)
     }
 
+    // Stamp the OpenFGA ownership tuple BEFORE creating any LBs. The
+    // LB create flow does its own `canAccessVm` check on the target,
+    // so the tuple has to exist by then. Also drives the per-VM
+    // ForwardAuth check (/vms/auth) for VM hostnames.
+    await this.fga.grantVmOwner(slug, ownerId).catch((err) => {
+      // Don't roll back the K8s resources — owner can still delete via
+      // the slug from the API. Log and surface the failure.
+      throw new Error(
+        `VM ${slug} created but FGA owner tuple write failed: ${(err as Error).message}`,
+      )
+    })
+
     // Optional convenience LBs attached at create time. One create
     // per entry, sequential so 409s don't overlap. Failure throws —
     // the VM is already up at this point but the caller should know
@@ -351,17 +363,6 @@ export class VmsService {
         persistOnVmDelete: !!lb.persistOnVmDelete,
       })
     }
-
-    // Stamp the OpenFGA ownership tuple. This is what the per-VM
-    // ForwardAuth check (/vms/auth) reads to decide whether a logged-
-    // in user can reach this VM's URLs.
-    await this.fga.grantVmOwner(slug, ownerId).catch((err) => {
-      // Don't roll back the K8s resources — owner can still delete via
-      // the slug from the API. Log and surface the failure.
-      throw new Error(
-        `VM ${slug} created but FGA owner tuple write failed: ${(err as Error).message}`,
-      )
-    })
 
     const vms = await this.listForOwner(ownerId)
     const created = vms.find((v) => v.slug === slug)
