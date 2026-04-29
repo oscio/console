@@ -412,12 +412,13 @@ export class VmsService {
       .catch(() => undefined)
 
     // Volume cleanup: persist=true → unbind only (the volume shows
-    // up under /volumes for re-attach). persist=false → delete the
-    // PVC entirely. volumeMode=none → no volume, nothing to do.
+    // up under /volumes for re-attach). persist=false → unbind THEN
+    // delete (volumes.delete refuses to delete a volume with a
+    // bound-to label, so unbind has to come first). volumeMode=none
+    // → no volume, nothing to do.
     if (boundVolume) {
-      if (persistVolume) {
-        await this.volumes.unbindFromVm(ownerId, boundVolume)
-      } else {
+      await this.volumes.unbindFromVm(ownerId, boundVolume).catch(() => undefined)
+      if (!persistVolume) {
         await this.volumes.delete(ownerId, boundVolume).catch(() => undefined)
       }
     }
