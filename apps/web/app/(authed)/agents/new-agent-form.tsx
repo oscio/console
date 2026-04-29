@@ -32,7 +32,7 @@ export function NewAgentForm({ action }: { action: Action }) {
   const [open, setOpen] = useState(false)
   // shadcn Select renders a Radix Listbox, not a native <select>, so
   // mirror its value into a hidden input for FormData.
-  const [agentType, setAgentType] = useState<"hermes" | "openclaw">("hermes")
+  const [agentType, setAgentType] = useState<"hermes" | "zeroclaw">("hermes")
 
   return (
     <Sheet
@@ -49,8 +49,9 @@ export function NewAgentForm({ action }: { action: Action }) {
         <SheetHeader>
           <SheetTitle>New Agent</SheetTitle>
           <SheetDescription>
-            Provisions a StatefulSet (1 replica) in your{" "}
-            <code>resource-agent-…</code> namespace.
+            Provisions a StatefulSet (1 replica) in the shared{" "}
+            <code>resource</code> namespace. Ownership is enforced via
+            OpenFGA.
           </SheetDescription>
         </SheetHeader>
 
@@ -87,19 +88,19 @@ export function NewAgentForm({ action }: { action: Action }) {
           <Field
             id="agent-type"
             label="Type"
-            hint="Picks which entrypoint-<type>.sh runs inside the pod."
+            hint="Selects which adapter the FastAPI wrapper dispatches to."
           >
             <input type="hidden" name="agentType" value={agentType} />
             <Select
               value={agentType}
-              onValueChange={(v) => setAgentType(v as "hermes" | "openclaw")}
+              onValueChange={(v) => setAgentType(v as "hermes" | "zeroclaw")}
             >
               <SelectTrigger id="agent-type" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="hermes">hermes</SelectItem>
-                <SelectItem value="openclaw">openclaw</SelectItem>
+                <SelectItem value="zeroclaw">zeroclaw</SelectItem>
               </SelectContent>
             </Select>
           </Field>

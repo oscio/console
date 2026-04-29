@@ -87,7 +87,7 @@ export async function setConsoleAdminRole(
 }
 
 export type VmImageType = "base" | "desktop"
-export type VmAgentType = "none"
+export type VmAgentType = "none" | "hermes" | "zeroclaw"
 export type VmStatus = "Pending" | "Running" | "Failed" | "Unknown"
 
 export type Vm = {
@@ -244,6 +244,141 @@ export async function deleteAgent(
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => "")
     throw new Error(`agents delete failed: ${res.status} ${text}`)
+  }
+}
+
+// ---------- agent chat ----------
+//
+// All chat traffic goes through console-api at /agents/<slug>/chat/...
+// The api proxies to the in-cluster wrapper sidecar; SSE streaming
+// is the wrapper's text/event-stream piped straight through.
+
+export type AgentSession = {
+  session_id: string
+  name: string
+  agent_type: string
+  created_at: number
+}
+
+export type AgentTaskStatus =
+  | "running"
+  | "done"
+  | "failed"
+  | "interrupted"
+
+export type AgentTaskEvent = {
+  ts: number
+  type: string
+  // Adapter-specific payload — kept loose since the wrapper's
+  // adapters can introduce new event types without UI change.
+  [key: string]: unknown
+}
+
+export type AgentTask = {
+  task_id: string
+  session_id: string
+  agent_type: string
+  status: AgentTaskStatus
+  started_at: number
+  finished_at?: number
+  exit_code?: number
+  cmd?: string[]
+  events?: AgentTaskEvent[]
+}
+
+export async function listAgentSessions(
+  cookieHeader: string,
+  slug: string,
+): Promise<AgentSession[]> {
+  const res = await fetch(
+    `${API_URL}/agents/${encodeURIComponent(slug)}/chat/sessions`,
+    { headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agent sessions list failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as AgentSession[]
+}
+
+export async function createAgentSession(
+  cookieHeader: string,
+  slug: string,
+  input: { name?: string } = {},
+): Promise<AgentSession> {
+  const res = await fetch(
+    `${API_URL}/agents/${encodeURIComponent(slug)}/chat/sessions`,
+    {
+      method: "POST",
+      headers: { cookie: cookieHeader, "content-type": "application/json" },
+      body: JSON.stringify(input),
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agent session create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as AgentSession
+}
+
+export async function createAgentTask(
+  cookieHeader: string,
+  slug: string,
+  input: { session_id: string; prompt: string },
+): Promise<{ task_id: string; session_id: string; status: string }> {
+  const res = await fetch(
+    `${API_URL}/agents/${encodeURIComponent(slug)}/chat/tasks`,
+    {
+      method: "POST",
+      headers: { cookie: cookieHeader, "content-type": "application/json" },
+      body: JSON.stringify(input),
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agent task create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as {
+    task_id: string
+    session_id: string
+    status: string
+  }
+}
+
+export async function getAgentTask(
+  cookieHeader: string,
+  slug: string,
+  taskId: string,
+): Promise<AgentTask> {
+  const res = await fetch(
+    `${API_URL}/agents/${encodeURIComponent(slug)}/chat/tasks/${encodeURIComponent(taskId)}`,
+    { headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agent task get failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as AgentTask
+}
+
+export async function cancelAgentTask(
+  cookieHeader: string,
+  slug: string,
+  taskId: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/agents/${encodeURIComponent(slug)}/chat/tasks/${encodeURIComponent(taskId)}/cancel`,
+    {
+      method: "POST",
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agent task cancel failed: ${res.status} ${text}`)
   }
 }
 

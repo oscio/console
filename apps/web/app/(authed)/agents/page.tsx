@@ -73,6 +73,7 @@ export default async function AgentsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>ID</TableHead>
                 <TableHead>Type</TableHead>
+                <TableHead>Bound to</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -95,6 +96,18 @@ export default async function AgentsPage() {
                   <TableCell>
                     <Badge variant="secondary">{agent.agentType}</Badge>
                   </TableCell>
+                  <TableCell className="text-xs">
+                    {agent.boundToVm ? (
+                      <Link
+                        href={`/vms/${agent.boundToVm}`}
+                        className="font-mono hover:underline"
+                      >
+                        {agent.boundToVm}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <StatusBadge status={agent.status} />
                   </TableCell>
@@ -106,11 +119,13 @@ export default async function AgentsPage() {
                       <Button asChild size="sm" variant="outline">
                         <Link href={`/agents/${agent.slug}`}>Open</Link>
                       </Button>
-                      <DeleteAgentButton
-                        action={deleteAgentAction}
-                        slug={agent.slug}
-                        label={agent.name}
-                      />
+                      {!agent.boundToVm && (
+                        <DeleteAgentButton
+                          action={deleteAgentAction}
+                          slug={agent.slug}
+                          label={agent.name}
+                        />
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -118,7 +133,7 @@ export default async function AgentsPage() {
               {agents.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-muted-foreground py-6 text-center"
                   >
                     No agents yet.

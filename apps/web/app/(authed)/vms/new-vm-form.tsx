@@ -55,6 +55,14 @@ export function NewVmForm({
   const [persist, setPersist] = useState(false)
   const [attachSlug, setAttachSlug] = useState<string>(freeVolumes[0]?.slug ?? "")
 
+  // Agent attachment. "none" = no sidecar; otherwise the chosen value
+  // becomes AGENT_TYPE on the agent sidecar container, which the
+  // FastAPI wrapper inside dispatches on. Attached agents surface
+  // under /agents (boundToVm = this VM's slug).
+  const [agentType, setAgentType] = useState<"none" | "hermes" | "zeroclaw">(
+    "none",
+  )
+
   // Multiple LBs per VM. Each item becomes one ClusterIP Service +
   // HTTPRoute pair on the api side. `key` is React-only — stripped
   // before encoding into the hidden `loadBalancers` field.
@@ -271,6 +279,38 @@ export function NewVmForm({
               <p className="text-muted-foreground text-xs ">
                 The pod's <code>/home/agent</code> lives on the container's
                 ephemeral filesystem; everything is lost on pod restart.
+              </p>
+            )}
+          </div>
+
+          {/* Agent attachment. "none" = no sidecar. Otherwise an
+              agent sidecar runs in this pod and surfaces in /agents
+              with boundToVm = <this VM>. Bash inside the sidecar is
+              shimmed over SSH to this workspace, so the agent's
+              tool calls operate on the user's actual environment. */}
+          <div className="space-y-3">
+            <Label htmlFor="vm-agent-type">Agent</Label>
+            <input type="hidden" name="agentType" value={agentType} />
+            <Select
+              value={agentType}
+              onValueChange={(v) =>
+                setAgentType(v as "none" | "hermes" | "zeroclaw")
+              }
+            >
+              <SelectTrigger id="vm-agent-type" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No agent</SelectItem>
+                <SelectItem value="hermes">hermes</SelectItem>
+                <SelectItem value="zeroclaw">zeroclaw</SelectItem>
+              </SelectContent>
+            </Select>
+            {agentType !== "none" && (
+              <p className="text-muted-foreground text-xs">
+                The agent appears under <code>/agents</code> with{" "}
+                <code>boundToVm = &lt;this VM&gt;</code>. Cascade-deleted
+                with the VM.
               </p>
             )}
           </div>

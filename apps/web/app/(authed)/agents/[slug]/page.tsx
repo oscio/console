@@ -10,7 +10,7 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 import { fetchAgents, type Agent, type AgentStatus } from "@/lib/api"
-import { ArrowSquareOut, Robot } from "@phosphor-icons/react/dist/ssr"
+import { ChatCircle, Cube } from "@phosphor-icons/react/dist/ssr"
 
 export default async function AgentDetailPage({
   params,
@@ -44,25 +44,45 @@ export default async function AgentDetailPage({
         <div className="mt-2 flex items-center gap-3">
           <h1 className="text-2xl font-semibold">{agent.name}</h1>
           <StatusBadge status={agent.status} />
+          {agent.boundToVm && (
+            <Badge variant="outline" className="font-mono text-xs">
+              sidecar of{" "}
+              <Link
+                href={`/vms/${agent.boundToVm}`}
+                className="ml-1 hover:underline"
+              >
+                {agent.boundToVm}
+              </Link>
+            </Badge>
+          )}
         </div>
         <p className="text-muted-foreground font-mono text-xs">{agent.slug}</p>
       </div>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Launch</h2>
+        <h2 className="text-lg font-semibold">Open</h2>
         {!isRunning && (
           <p className="text-muted-foreground text-xs">
-            Button activates once the agent is Running.
+            Card activates once the agent is Running.
           </p>
         )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <LaunchCard
-            href={agent.gatewayUrl}
+          <NavCard
+            href={`/agents/${agent.slug}/chat`}
             disabled={!isRunning}
-            icon={<Robot weight="duotone" className="size-5" />}
-            title="Agent Gateway"
-            blurb={`The ${agent.agentType} gateway, served on port 8000.`}
+            icon={<ChatCircle weight="duotone" className="size-5" />}
+            title="Chat"
+            blurb={`Talk to the ${agent.agentType} agent. Sessions persist on the workspace volume.`}
           />
+          {agent.boundToVm && (
+            <NavCard
+              href={`/vms/${agent.boundToVm}`}
+              disabled={false}
+              icon={<Cube weight="duotone" className="size-5" />}
+              title="Open VM"
+              blurb={`Workspace this sidecar is attached to (${agent.boundToVm}).`}
+            />
+          )}
         </div>
       </section>
 
@@ -91,8 +111,24 @@ function Details({ agent }: { agent: Agent }) {
       <dd>
         <StatusBadge status={agent.status} />
       </dd>
-      <dt className="text-muted-foreground">Hostname</dt>
-      <dd className="font-mono text-xs">{agent.hostname}</dd>
+      {agent.boundToVm ? (
+        <>
+          <dt className="text-muted-foreground">Bound to</dt>
+          <dd>
+            <Link
+              href={`/vms/${agent.boundToVm}`}
+              className="font-mono text-xs hover:underline"
+            >
+              {agent.boundToVm}
+            </Link>
+          </dd>
+        </>
+      ) : (
+        <>
+          <dt className="text-muted-foreground">Hostname</dt>
+          <dd className="font-mono text-xs">{agent.hostname}</dd>
+        </>
+      )}
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono text-xs">{agent.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
@@ -101,7 +137,7 @@ function Details({ agent }: { agent: Agent }) {
   )
 }
 
-function LaunchCard({
+function NavCard({
   href,
   disabled,
   icon,
@@ -127,12 +163,6 @@ function LaunchCard({
         <div className="flex items-center gap-2">
           {icon}
           <CardTitle className="text-sm">{title}</CardTitle>
-          {!disabled && (
-            <ArrowSquareOut
-              className="text-muted-foreground group-hover:text-foreground ml-auto size-4 transition-colors"
-              weight="bold"
-            />
-          )}
         </div>
         <CardDescription className="text-xs leading-relaxed">
           {blurb}
@@ -142,14 +172,12 @@ function LaunchCard({
   )
   if (disabled) return inner
   return (
-    <a
+    <Link
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
       className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       {inner}
-    </a>
+    </Link>
   )
 }
 
