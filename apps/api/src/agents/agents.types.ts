@@ -1,7 +1,7 @@
-// Agent runtime — picks which entrypoint-<type>.sh runs inside the
-// pod. Add a new value here and a matching script in services/agents
-// to onboard a new agent.
-export type AgentType = "hermes" | "openclaw"
+// Agent runtime — picks which adapter the FastAPI wrapper inside the
+// pod dispatches to. Add a new value here and a matching adapter in
+// services/agents/wrapper/adapters/ to onboard a new agent.
+export type AgentType = "hermes" | "zeroclaw"
 
 export type AgentStatus = "Pending" | "Running" | "Failed" | "Unknown"
 

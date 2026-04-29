@@ -84,6 +84,10 @@ export class VmsService {
 
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
+  // Agent sidecar image. Same image regardless of agentType — the
+  // entrypoint reads AGENT_TYPE and dispatches to the right adapter.
+  // Shared with AgentsService.
+  private readonly agentImage = process.env.AGENT_IMAGE ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
   // oauth2-proxy public URL. Launch links route through
   // /oauth2/start?rd=<vm-url> so users get silent SSO via Keycloak
@@ -229,7 +233,162 @@ export class VmsService {
     // Create the headless Service first so the StatefulSet's stable DNS
     // (`<slug>-0.<svc>.<ns>.svc.cluster.local`) resolves the moment the
     // pod comes up.
-    await this.ensureService(ns, slug, input.imageType)
+    // Build the pod spec piece-by-piece. Agent attachment adds an
+    // emptyDir volume + init container (generates ed25519 keypair) +
+    // a sidecar container running the agent wrapper. The workspace
+    // mounts the public key from the same emptyDir; sshd in the
+    // workspace already picks up authorized_keys via start.sh.
+    const wantAgent = input.agentType !== "none"
+
+    await this.ensureService(ns, slug, input.imageType, wantAgent)
+    if (wantAgent && !this.agentImage) {
+      throw new BadRequestException(
+        "Agent sidecar requested but AGENT_IMAGE env var is not set on console-api.",
+      )
+    }
+
+    const workspaceMounts: Array<{
+      name: string
+      mountPath: string
+      subPath?: string
+      readOnly?: boolean
+    }> = []
+    if (volumeSlug) {
+      workspaceMounts.push({
+        name: VM_DATA_VOLUME_NAME,
+        mountPath: VM_DATA_MOUNT_PATH,
+      })
+    }
+    if (wantAgent) {
+      workspaceMounts.push({
+        name: "agent-ssh",
+        mountPath: "/etc/agent-ssh",
+        readOnly: true,
+      })
+    }
+
+    const containers: Array<Record<string, unknown>> = [
+      {
+        name: "vm",
+        image,
+        ports: [
+          { name: "http", containerPort: 8080 },
+          { name: "xterm", containerPort: 7681 },
+          { name: "webui", containerPort: 8787 },
+          ...(input.imageType === "desktop"
+            ? [{ name: "vnc", containerPort: 6901 }]
+            : []),
+          ...(wantAgent ? [{ name: "ssh", containerPort: 22 }] : []),
+        ],
+        env: [
+          { name: "VM_OWNER", value: ownerId },
+          { name: "VM_SLUG", value: slug },
+          { name: "VM_NAME", value: displayName },
+          { name: "VM_AGENT", value: input.agentType },
+          { name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" },
+        ],
+        volumeMounts: workspaceMounts,
+        resources: {
+          requests: { cpu, memory },
+          limits: { cpu, memory },
+        },
+      },
+      {
+        name: "dind",
+        image: "docker:24-dind",
+        args: ["--mtu=1450"],
+        env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }],
+        securityContext: { privileged: true, runAsUser: 0 },
+        volumeMounts: volumeSlug
+          ? [
+              {
+                name: VM_DATA_VOLUME_NAME,
+                mountPath: "/var/lib/docker",
+                subPath: "docker",
+              },
+            ]
+          : [],
+      },
+    ]
+    if (wantAgent) {
+      containers.push({
+        name: "agent",
+        image: this.agentImage,
+        ports: [{ name: "agent-http", containerPort: 8000 }],
+        env: [
+          { name: "AGENT_TYPE", value: input.agentType },
+          { name: "AGENT_USE_SSH_SHIM", value: "true" },
+          { name: "SSH_HOST", value: "localhost" },
+          { name: "SSH_PORT", value: "22" },
+          { name: "SSH_USER", value: "coder" },
+          { name: "SSH_KEY", value: "/etc/agent-ssh/id_ed25519" },
+          // Agent state lives under the workspace PVC (same path as
+          // the workspace container sees it) so context survives
+          // pod restarts and is co-located with the project files.
+          { name: "WORKSPACE_DIR", value: VM_DATA_MOUNT_PATH },
+          { name: "AGENT_PORT", value: "8000" },
+          { name: "AGENT_HOST", value: "0.0.0.0" },
+        ],
+        volumeMounts: [
+          // The wrapper writes session/task/event state under
+          // $WORKSPACE/.agent/ — needs the PVC.
+          ...(volumeSlug
+            ? [
+                {
+                  name: VM_DATA_VOLUME_NAME,
+                  mountPath: VM_DATA_MOUNT_PATH,
+                },
+              ]
+            : []),
+          {
+            name: "agent-ssh",
+            mountPath: "/etc/agent-ssh",
+            readOnly: true,
+          },
+        ],
+      })
+    }
+
+    const podVolumes: Array<Record<string, unknown>> = []
+    if (volumeSlug) {
+      podVolumes.push({
+        name: VM_DATA_VOLUME_NAME,
+        persistentVolumeClaim: { claimName: volumeSlug },
+      })
+    }
+    if (wantAgent) {
+      podVolumes.push({ name: "agent-ssh", emptyDir: {} })
+    }
+
+    // Init container generates the ed25519 keypair into the shared
+    // emptyDir before either main container starts. Public key →
+    // workspace's authorized_keys; private key → sidecar's SSH_KEY
+    // mount. Lives only for the pod's lifetime; pod restart = new
+    // keypair (which is fine — every pod is a fresh sandbox).
+    const initContainers = wantAgent
+      ? [
+          {
+            name: "agent-ssh-init",
+            // Reuse the workspace image — guaranteed to have ssh-keygen
+            // since we apt-get'd openssh-server into it.
+            image,
+            command: ["/bin/sh", "-c"],
+            args: [
+              "set -e; " +
+                "if [ ! -f /etc/agent-ssh/id_ed25519 ]; then " +
+                "ssh-keygen -t ed25519 -N '' -C agent-sidecar -f /etc/agent-ssh/id_ed25519; " +
+                "cp /etc/agent-ssh/id_ed25519.pub /etc/agent-ssh/authorized_keys; " +
+                "fi; " +
+                // sidecar's ssh client refuses to use a private key
+                // with relaxed perms — emptyDir defaults to 0644.
+                "chmod 0600 /etc/agent-ssh/id_ed25519",
+            ],
+            volumeMounts: [
+              { name: "agent-ssh", mountPath: "/etc/agent-ssh" },
+            ],
+          },
+        ]
+      : []
 
     const apps = k8sApps()
     try {
@@ -259,62 +418,17 @@ export class VmsService {
                   "agent-platform/vm-slug": slug,
                 },
               },
-              spec: {
-                containers: [
-                  {
-                    name: "vm",
-                    image,
-                    ports: [
-                      { name: "http", containerPort: 8080 },
-                      { name: "xterm", containerPort: 7681 },
-                      { name: "webui", containerPort: 8787 },
-                      ...(input.imageType === "desktop"
-                        ? [{ name: "vnc", containerPort: 6901 }]
-                        : []),
-                    ],
-                    env: [
-                      { name: "VM_OWNER", value: ownerId },
-                      { name: "VM_SLUG", value: slug },
-                      { name: "VM_NAME", value: displayName },
-                      { name: "VM_AGENT", value: input.agentType },
-                      { name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" },
-                    ],
-                    volumeMounts: volumeSlug
-                      ? [{ name: VM_DATA_VOLUME_NAME, mountPath: VM_DATA_MOUNT_PATH }]
-                      : [],
-                    resources: {
-                      requests: { cpu, memory },
-                      limits: { cpu, memory },
-                    },
-                  },
-                  {
-                    name: "dind",
-                    image: "docker:24-dind",
-                    args: ["--mtu=1450"],
-                    env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }],
-                    securityContext: { privileged: true, runAsUser: 0 },
-                    volumeMounts: volumeSlug
-                      ? [
-                          {
-                            name: VM_DATA_VOLUME_NAME,
-                            mountPath: "/var/lib/docker",
-                            subPath: "docker",
-                          },
-                        ]
-                      : [],
-                  },
-                ],
-                // PVC-backed `data` volume when one is bound; absent
-                // for volumeMode=none (container ephemeral fs only).
-                volumes: volumeSlug
-                  ? [
-                      {
-                        name: VM_DATA_VOLUME_NAME,
-                        persistentVolumeClaim: { claimName: volumeSlug },
-                      },
-                    ]
-                  : [],
-              },
+              // Casting via `any` — the dynamic shapes come from
+              // optional sidecar / init container / volume arrays
+              // that we build conditionally above. Each element
+              // has the right K8s shape; just not narrowable back
+              // to V1Container[] from Record<string, unknown>[].
+              spec: ({
+                ...(initContainers.length ? { initContainers } : {}),
+                containers,
+                volumes: podVolumes,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as unknown as any),
             },
           },
         },
@@ -600,6 +714,7 @@ export class VmsService {
     ns: string,
     name: string,
     imageType: VmImageType,
+    wantAgent: boolean,
   ): Promise<void> {
     const core = k8sCore()
     try {
@@ -616,6 +731,9 @@ export class VmsService {
       { name: "webui", port: 8787, targetPort: 8787 },
       ...(imageType === "desktop"
         ? [{ name: "vnc", port: 6901, targetPort: 6901 }]
+        : []),
+      ...(wantAgent
+        ? [{ name: "agent-http", port: 8000, targetPort: 8000 }]
         : []),
     ]
     try {

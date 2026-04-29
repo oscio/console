@@ -19,7 +19,7 @@ import { OpenFgaService } from "../openfga/openfga.service"
 import { AgentsService } from "./agents.service"
 import { AgentType, CreateAgentInput } from "./agents.types"
 
-const ALLOWED_AGENT: ReadonlySet<AgentType> = new Set(["hermes", "openclaw"])
+const ALLOWED_AGENT: ReadonlySet<AgentType> = new Set(["hermes", "zeroclaw"])
 
 // Traefik ForwardAuth target. Same pattern as VmsAuthController:
 // reaches us through Traefik (no better-auth cookie), so the source

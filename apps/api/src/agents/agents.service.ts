@@ -198,10 +198,9 @@ export class AgentsService {
                   {
                     name: "agent",
                     image,
-                    // Only the agent gateway. AGENT_TYPE picks the
-                    // entrypoint-*.sh runner; AGENT_PORT fixes the
-                    // listening port so the Service / HTTPRoute /
-                    // pod all agree.
+                    // AGENT_TYPE picks the wrapper's adapter;
+                    // AGENT_PORT is the FastAPI listen port. Service
+                    // + HTTPRoute have to match (see ensureService).
                     ports: [
                       { name: "http", containerPort: AGENT_PORT },
                     ],
@@ -211,9 +210,18 @@ export class AgentsService {
                       { name: "AGENT_NAME", value: displayName },
                       { name: "AGENT_TYPE", value: input.agentType },
                       { name: "AGENT_PORT", value: String(AGENT_PORT) },
+                      { name: "AGENT_HOST", value: "0.0.0.0" },
+                      // Headless = no workspace container, no SSH
+                      // shim. The wrapper just runs the agent CLI
+                      // directly inside this container.
+                      { name: "AGENT_USE_SSH_SHIM", value: "false" },
+                      // Wrapper's WORKSPACE_DIR — events.jsonl /
+                      // sessions live under this. PVC is mounted
+                      // here so state survives pod restarts.
+                      { name: "WORKSPACE_DIR", value: "/home/agent/workspace" },
                     ],
                     volumeMounts: [
-                      { name: "data", mountPath: "/home/agent" },
+                      { name: "data", mountPath: "/home/agent/workspace" },
                     ],
                   },
                 ],

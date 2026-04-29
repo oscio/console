@@ -20,7 +20,11 @@ import { VmsService } from "./vms.service"
 import { CreateVmInput, VmAgentType, VmImageType } from "./vms.types"
 
 const ALLOWED_IMAGE: ReadonlySet<VmImageType> = new Set(["base", "desktop"])
-const ALLOWED_AGENT: ReadonlySet<VmAgentType> = new Set(["none"])
+const ALLOWED_AGENT: ReadonlySet<VmAgentType> = new Set([
+  "none",
+  "hermes",
+  "zeroclaw",
+])
 
 // Traefik ForwardAuth target. Called for every request to a VM
 // hostname (vm-XXX-{term,code,vnc}.vm.<domain>) AFTER oauth2-proxy
@@ -97,7 +101,9 @@ export class VmsController {
       throw new BadRequestException("imageType must be 'base' or 'desktop'")
     }
     if (!ALLOWED_AGENT.has(agentType)) {
-      throw new BadRequestException("agentType must be 'hermes' or 'none'")
+      throw new BadRequestException(
+        `agentType must be one of: ${[...ALLOWED_AGENT].join(", ")}`,
+      )
     }
     const volumeMode = (body.volumeMode ?? "new") as "new" | "attach" | "none"
     if (!new Set(["new", "attach", "none"]).has(volumeMode)) {

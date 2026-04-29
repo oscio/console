@@ -1,9 +1,9 @@
 export type VmImageType = "base" | "desktop"
-// `agentType` is a placeholder for now — future in-VM agents will be
-// wired by a `.sh` entrypoint, not selected at create time. Keeping
-// the field on the resource (label + API surface) so we don't break
-// existing tuples; "none" is the only value today.
-export type VmAgentType = "none"
+// `agentType` selects whether (and which) agent sidecar gets attached
+// to the VM pod. "none" = no sidecar. Otherwise the chosen value is
+// passed to the agent runtime via AGENT_TYPE — see
+// services/agents/wrapper/adapters/ for the supported list.
+export type VmAgentType = "none" | "hermes" | "zeroclaw"
 
 export type VmStatus = "Pending" | "Running" | "Failed" | "Unknown"
 
