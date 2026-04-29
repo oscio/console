@@ -37,7 +37,7 @@ const PRIMARY: NavItem[] = [
   { href: "/accounts", label: "Accounts", icon: IdentificationCard },
 ]
 
-const SERVICES: NavItem[] = [
+const RESOURCES: NavItem[] = [
   { href: "/vms", label: "VMs", icon: Stack },
   { href: "/volumes", label: "Volumes", icon: Database },
   { href: "/loadbalancers", label: "Load Balancers", icon: Network },
@@ -82,10 +82,10 @@ export function ConsoleSidebar({
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Services</SidebarGroupLabel>
+          <SidebarGroupLabel>Resources</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {SERVICES.map((item) => (
+              {RESOURCES.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </SidebarMenu>
