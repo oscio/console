@@ -67,6 +67,40 @@ export class OpenFgaService implements OnModuleInit {
     return tuples.map((t) => t.key.user)
   }
 
+  // List every object of `type` the user has `relation` on. The caller
+  // gets back the bare slug (no `type:` prefix). Used to drive the
+  // /vms /volumes /loadbalancers /agents list endpoints in place of
+  // the old "list everything in resource-vm-<owner>" namespace scan.
+  async listObjects(
+    userId: string,
+    relation: string,
+    type: string,
+  ): Promise<string[]> {
+    const res = await this.post(`/stores/${this.storeId}/list-objects`, {
+      type,
+      relation,
+      user: userKey(userId),
+    })
+    const objects = (res.objects ?? []) as string[]
+    const prefix = `${type}:`
+    return objects
+      .filter((o) => o.startsWith(prefix))
+      .map((o) => o.slice(prefix.length))
+  }
+
+  async listAccessibleVms(userId: string): Promise<string[]> {
+    return this.listObjects(userId, "can_access", "vm")
+  }
+  async listAccessibleVolumes(userId: string): Promise<string[]> {
+    return this.listObjects(userId, "can_access", "volume")
+  }
+  async listAccessibleLoadBalancers(userId: string): Promise<string[]> {
+    return this.listObjects(userId, "can_access", "loadbalancer")
+  }
+  async listAccessibleAgents(userId: string): Promise<string[]> {
+    return this.listObjects(userId, "can_access", "agent")
+  }
+
   // ---- Console-admin convenience -----------------------------------------
   // Note: there is intentionally no platform-admin equivalent. Platform-admin
   // is sourced from the Keycloak `platform-admin` group claim; it never

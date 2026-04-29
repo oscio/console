@@ -30,7 +30,13 @@ import {
   VmStatus,
 } from "./vms.types"
 
-const NS_PREFIX = "resource-vm-"
+// All VM/Volume/LB/Agent resources live in this single namespace.
+// Ownership is enforced by FGA tuples + per-resource ownership checks
+// in the service methods, not by namespace isolation. Switching from
+// per-owner namespaces was deliberate so we can later share/transfer
+// resources without moving k8s objects (which is impossible for PVCs
+// and surprising for everything else).
+export const RESOURCE_NS = "resource"
 
 function sanitizeLabel(value: string): string {
   return value
@@ -44,12 +50,6 @@ function sanitizeLabel(value: string): string {
 // DNS-1035-valid: starts with a letter, lowercase alnum, length 11.
 function randomSlug(): string {
   return `vm-${randomBytes(4).toString("hex")}`
-}
-
-function ownerNamespace(ownerId: string): string {
-  const slug = sanitizeLabel(ownerId)
-  if (!slug) throw new BadRequestException("Invalid owner id")
-  return `${NS_PREFIX}${slug}`
 }
 
 // @kubernetes/client-node throws ApiException with the K8s 4xx body
@@ -117,29 +117,37 @@ export class VmsService {
     return ref
   }
 
-  // List VMs across all `resource-vm-*` namespaces. We list StatefulSets
-  // cluster-wide with the VM label, then derive the row shape — cheaper
-  // and simpler than fanning out per namespace, and survives owners we
-  // don't know about yet.
+  // Admin-only: every VM in the resource namespace. Ownership labels
+  // surface in the toVm output so admins can see who owns what.
   async listAll(): Promise<Vm[]> {
     const apps = k8sApps()
-    const res = await apps.listStatefulSetForAllNamespaces({
-      labelSelector: `${VM_LABEL}=${VM_LABEL_VALUE}`,
-    })
-    return (res.items ?? []).map((sts) => this.toVm(sts))
-  }
-
-  async listForOwner(ownerId: string): Promise<Vm[]> {
-    const apps = k8sApps()
-    const ns = ownerNamespace(ownerId)
     const res = await apps.listNamespacedStatefulSet({
-      namespace: ns,
+      namespace: RESOURCE_NS,
       labelSelector: `${VM_LABEL}=${VM_LABEL_VALUE}`,
     }).catch((err: { code?: number; statusCode?: number }) => {
       if ((err.code ?? err.statusCode) === 404) return { items: [] }
       throw err
     })
     return (res.items ?? []).map((sts) => this.toVm(sts))
+  }
+
+  // FGA-driven listing: ask FGA which VMs the user can access, then
+  // batch-read those StatefulSets from the unified namespace. Stale
+  // tuples (FGA says yes but k8s 404s) are silently dropped.
+  async listForOwner(ownerId: string): Promise<Vm[]> {
+    const slugs = await this.fga.listAccessibleVms(ownerId)
+    if (slugs.length === 0) return []
+    const apps = k8sApps()
+    const results = await Promise.all(
+      slugs.map((slug) =>
+        apps
+          .readNamespacedStatefulSet({ name: slug, namespace: RESOURCE_NS })
+          .catch(() => null),
+      ),
+    )
+    return results
+      .filter((sts): sts is NonNullable<typeof sts> => sts !== null)
+      .map((sts) => this.toVm(sts))
   }
 
   async create(ownerId: string, input: CreateVmInput): Promise<Vm> {
@@ -149,12 +157,14 @@ export class VmsService {
       throw new BadRequestException("name must be 200 characters or fewer")
     }
     const slug = randomSlug()
-    const ns = ownerNamespace(ownerId)
+    const ns = RESOURCE_NS
     const image = this.imageFor(input.imageType)
     const cpu = input.cpuRequest ?? VM_DEFAULTS.cpu
     const memory = input.memoryRequest ?? VM_DEFAULTS.memory
 
-    await this.ensureNamespace(ns, ownerId)
+    // Idempotent: ensures the unified namespace exists on first
+    // create after a fresh deploy. Cheap on subsequent calls.
+    await this.ensureNamespace(ns)
 
     // Resolve the data volume per requested mode. We don't use
     // StatefulSet volumeClaimTemplates anymore — every PVC is a
@@ -185,7 +195,7 @@ export class VmsService {
       volumeSlug = v.slug
     }
 
-    // Per-namespace Middlewares cloned into the VM ns:
+    // Auth Middlewares live once in the unified namespace:
     //  1. oauth-auth → forwardAuth → oauth2-proxy /oauth2/auth (session)
     //  2. fga → forwardAuth → console-api /vms/auth (ownership)
     // (Direct-typed VM URLs without a session still get a blank 401 —
@@ -380,7 +390,11 @@ export class VmsService {
   async delete(ownerId: string, slug: string): Promise<void> {
     const cleanSlug = sanitizeLabel(slug)
     if (!cleanSlug) throw new BadRequestException("Invalid VM slug.")
-    const ns = ownerNamespace(ownerId)
+    // FGA gate: refuse to act on a VM the caller doesn't own. 404
+    // (not 403) so we don't leak existence to non-owners.
+    const allowed = await this.fga.canAccessVm(ownerId, cleanSlug)
+    if (!allowed) throw new NotFoundException(`VM "${cleanSlug}" not found.`)
+    const ns = RESOURCE_NS
     const apps = k8sApps()
     const core = k8sCore()
 
@@ -563,7 +577,7 @@ export class VmsService {
     })
   }
 
-  private async ensureNamespace(ns: string, ownerId: string): Promise<void> {
+  private async ensureNamespace(ns: string): Promise<void> {
     const core = k8sCore()
     try {
       await core.readNamespace({ name: ns })
@@ -577,10 +591,7 @@ export class VmsService {
       body: {
         metadata: {
           name: ns,
-          labels: {
-            [VM_LABEL]: "vm-namespace",
-            [VM_OWNER_LABEL]: sanitizeLabel(ownerId),
-          },
+          labels: { [VM_LABEL]: "resource-namespace" },
         },
       },
     })

@@ -9,6 +9,7 @@ import {
 import { authPool } from "@workspace/auth"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { k8sCore } from "../vms/k8s.client"
+import { RESOURCE_NS } from "../vms/vms.service"
 import {
   CreateVolumeInput,
   Volume,
@@ -20,20 +21,12 @@ import {
   VOLUME_OWNER_LABEL,
 } from "./volumes.types"
 
-const NS_PREFIX = "resource-vm-"
-
 function sanitizeLabel(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 63)
-}
-
-function ownerNamespace(ownerId: string): string {
-  const slug = sanitizeLabel(ownerId)
-  if (!slug) throw new BadRequestException("Invalid owner id")
-  return `${NS_PREFIX}${slug}`
 }
 
 function randomSlug(): string {
@@ -75,19 +68,26 @@ function statusFromPhase(
 export class VolumesService {
   constructor(private readonly fga: OpenFgaService) {}
 
-  // List every volume owned by a user. Free volumes (no boundTo
-  // label) are what `Attach existing` in the VM create flow shows.
+  // FGA-driven: ask FGA which volumes the user can access, batch-read
+  // those PVCs from the unified namespace. Stale tuples (FGA yes,
+  // k8s 404) are silently dropped.
   async listForOwner(ownerId: string): Promise<Volume[]> {
+    const slugs = await this.fga.listAccessibleVolumes(ownerId)
+    if (slugs.length === 0) return []
     const core = k8sCore()
-    const ns = ownerNamespace(ownerId)
-    const res = await core.listNamespacedPersistentVolumeClaim({
-      namespace: ns,
-      labelSelector: `${VOLUME_LABEL}=${VOLUME_LABEL_VALUE}`,
-    }).catch((err: { code?: number; statusCode?: number }) => {
-      if ((err.code ?? err.statusCode) === 404) return { items: [] }
-      throw err
-    })
-    return (res.items ?? []).map((p) => this.toVolume(p))
+    const results = await Promise.all(
+      slugs.map((slug) =>
+        core
+          .readNamespacedPersistentVolumeClaim({
+            name: slug,
+            namespace: RESOURCE_NS,
+          })
+          .catch(() => null),
+      ),
+    )
+    return results
+      .filter((p): p is NonNullable<typeof p> => p !== null)
+      .map((p) => this.toVolume(p))
   }
 
   async create(ownerId: string, input: CreateVolumeInput): Promise<Volume> {
@@ -97,9 +97,9 @@ export class VolumesService {
       throw new BadRequestException("sizeGi must be between 1 and 200")
     }
     const slug = randomSlug()
-    const ns = ownerNamespace(ownerId)
+    const ns = RESOURCE_NS
 
-    await this.ensureNamespace(ns, ownerId)
+    await this.ensureNamespace(ns)
 
     const core = k8sCore()
     try {
@@ -149,7 +149,12 @@ export class VolumesService {
   async delete(ownerId: string, slug: string): Promise<void> {
     const cleanSlug = sanitizeLabel(slug)
     if (!cleanSlug) throw new BadRequestException("Invalid volume slug.")
-    const ns = ownerNamespace(ownerId)
+    // FGA gate. 404 (not 403) so we don't leak existence to non-owners.
+    const allowed = await this.fga.canAccessVolume(ownerId, cleanSlug)
+    if (!allowed) {
+      throw new NotFoundException(`Volume "${cleanSlug}" not found.`)
+    }
+    const ns = RESOURCE_NS
     const core = k8sCore()
     // Refuse to delete a bound volume — the user should detach (delete
     // the VM) first. K8s would queue the PVC for deletion otherwise,
@@ -180,7 +185,11 @@ export class VolumesService {
   // proper JSON Patch array. Forward-slash in label keys is
   // encoded as `~1` per JSON Pointer (RFC 6901).
   async bindToVm(ownerId: string, volumeSlug: string, vmSlug: string): Promise<void> {
-    const ns = ownerNamespace(ownerId)
+    // ownerId arg kept for symmetry — namespace is now unified, so it
+    // isn't used to locate the PVC. Caller's ownership has already
+    // been validated upstream (vms.service before bind).
+    void ownerId
+    const ns = RESOURCE_NS
     const core = k8sCore()
     const path = jsonPointerLabel(VOLUME_BOUND_TO_LABEL)
     await core
@@ -197,7 +206,8 @@ export class VolumesService {
   // shows up in the "attach" picker again. `remove` 422s when the
   // label is already missing; that's fine, just swallow it.
   async unbindFromVm(ownerId: string, volumeSlug: string): Promise<void> {
-    const ns = ownerNamespace(ownerId)
+    void ownerId
+    const ns = RESOURCE_NS
     const core = k8sCore()
     const path = jsonPointerLabel(VOLUME_BOUND_TO_LABEL)
     await core
@@ -221,7 +231,7 @@ export class VolumesService {
     return this.fga.canAccessVolume(userId, cleanSlug)
   }
 
-  private async ensureNamespace(ns: string, ownerId: string): Promise<void> {
+  private async ensureNamespace(ns: string): Promise<void> {
     const core = k8sCore()
     try {
       await core.readNamespace({ name: ns })
@@ -232,12 +242,7 @@ export class VolumesService {
       if (code !== 404) throw err
     }
     await core.createNamespace({
-      body: {
-        metadata: {
-          name: ns,
-          labels: { [VOLUME_OWNER_LABEL]: sanitizeLabel(ownerId) },
-        },
-      },
+      body: { metadata: { name: ns } },
     })
   }
 

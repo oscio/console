@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { k8sCore, k8sCustom } from "../vms/k8s.client"
+import { RESOURCE_NS } from "../vms/vms.service"
 import {
   CreateLoadBalancerInput,
   LoadBalancer,
@@ -21,20 +22,12 @@ import {
   LB_VM_LABEL,
 } from "./loadbalancers.types"
 
-const NS_PREFIX = "resource-vm-"
-
 function sanitizeLabel(value: string): string {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 63)
-}
-
-function ownerNamespace(ownerId: string): string {
-  const slug = sanitizeLabel(ownerId)
-  if (!slug) throw new BadRequestException("Invalid owner id")
-  return `${NS_PREFIX}${slug}`
 }
 
 function randomSlug(): string {
@@ -75,25 +68,31 @@ export class LoadBalancersService {
   constructor(private readonly fga: OpenFgaService) {}
 
   async listForOwner(ownerId: string): Promise<LoadBalancer[]> {
+    const slugs = await this.fga.listAccessibleLoadBalancers(ownerId)
+    if (slugs.length === 0) return []
     const custom = k8sCustom()
-    const ns = ownerNamespace(ownerId)
-    const res = (await custom
-      .listNamespacedCustomObject({
-        group: "gateway.networking.k8s.io",
-        version: "v1",
-        namespace: ns,
-        plural: "httproutes",
-        labelSelector: `${LB_LABEL}=${LB_LABEL_VALUE}`,
-      })
-      .catch((err: { code?: number; statusCode?: number }) => {
-        if ((err.code ?? err.statusCode) === 404) return { items: [] }
-        throw err
-      })) as { items?: HttpRouteShape[] }
-    const items = res.items ?? []
-    // Pull endpoint counts in one shot so the status column reflects
-    // pod readiness without a per-row API call.
-    const endpoints = await this.endpointMap(ns).catch(() => new Map<string, boolean>())
-    return items.map((r) => this.toLb(r, endpoints))
+    const ns = RESOURCE_NS
+    const items = await Promise.all(
+      slugs.map((slug) =>
+        custom
+          .getNamespacedCustomObject({
+            group: "gateway.networking.k8s.io",
+            version: "v1",
+            namespace: ns,
+            plural: "httproutes",
+            name: slug,
+          })
+          .catch(() => null),
+      ),
+    )
+    const present = items.filter(
+      (r): r is HttpRouteShape => r !== null,
+    )
+    if (present.length === 0) return []
+    const endpoints = await this.endpointMap(ns).catch(
+      () => new Map<string, boolean>(),
+    )
+    return present.map((r) => this.toLb(r, endpoints))
   }
 
   async create(
@@ -108,9 +107,16 @@ export class LoadBalancersService {
     if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) {
       throw new BadRequestException("port must be an integer 1-65535")
     }
-    const slug = randomSlug()
-    const ns = ownerNamespace(ownerId)
     const vmSlug = sanitizeLabel(input.vmSlug)
+    // FGA gate: caller must own the target VM. Without this check the
+    // unified namespace would let any logged-in user point an LB at
+    // anyone else's VM.
+    const allowed = await this.fga.canAccessVm(ownerId, vmSlug)
+    if (!allowed) {
+      throw new NotFoundException(`VM "${vmSlug}" not found.`)
+    }
+    const slug = randomSlug()
+    const ns = RESOURCE_NS
 
     // Service: ClusterIP, selects the VM pod by vm-slug label.
     const core = k8sCore()
@@ -218,7 +224,11 @@ export class LoadBalancersService {
   async delete(ownerId: string, slug: string): Promise<void> {
     const cleanSlug = sanitizeLabel(slug)
     if (!cleanSlug) throw new BadRequestException("Invalid LB slug.")
-    const ns = ownerNamespace(ownerId)
+    const allowed = await this.fga.canAccessLoadBalancer(ownerId, cleanSlug)
+    if (!allowed) {
+      throw new NotFoundException(`LoadBalancer "${cleanSlug}" not found.`)
+    }
+    const ns = RESOURCE_NS
     const core = k8sCore()
     const custom = k8sCustom()
     await custom
@@ -247,7 +257,7 @@ export class LoadBalancersService {
   // "kept" (persisted ones outlive the VM and become broken until
   // re-pointed; we leave them visible under /loadbalancers).
   async cascadeDeleteForVm(ownerId: string, vmSlug: string): Promise<void> {
-    const ns = ownerNamespace(ownerId)
+    const ns = RESOURCE_NS
     const custom = k8sCustom()
     const res = (await custom
       .listNamespacedCustomObject({

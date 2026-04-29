@@ -8,6 +8,7 @@ import {
 import { randomBytes } from "node:crypto"
 import { authPool } from "@workspace/auth"
 import { OpenFgaService } from "../openfga/openfga.service"
+import { RESOURCE_NS } from "../vms/vms.service"
 import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
 import {
   Agent,
@@ -22,8 +23,6 @@ import {
   CreateAgentInput,
 } from "./agents.types"
 
-const NS_PREFIX = "resource-agent-"
-
 function sanitizeLabel(value: string): string {
   return value
     .toLowerCase()
@@ -36,12 +35,6 @@ function sanitizeLabel(value: string): string {
 // hosts never collide on the wildcard listener.
 function randomSlug(): string {
   return `agent-${randomBytes(4).toString("hex")}`
-}
-
-function ownerNamespace(ownerId: string): string {
-  const slug = sanitizeLabel(ownerId)
-  if (!slug) throw new BadRequestException("Invalid owner id")
-  return `${NS_PREFIX}${slug}`
 }
 
 // Surface 4xx K8s errors with their original message + status. Same
@@ -105,23 +98,12 @@ export class AgentsService {
     return this.image
   }
 
-  // List agents across all `resource-agent-*` namespaces. Same
-  // cluster-wide listing trick as VMs — survives unfamiliar owners
-  // and stays cheap.
+  // Admin-only: every agent in the unified resource namespace.
   async listAll(): Promise<Agent[]> {
     const apps = k8sApps()
-    const res = await apps.listStatefulSetForAllNamespaces({
-      labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE}`,
-    })
-    return (res.items ?? []).map((sts) => this.toAgent(sts))
-  }
-
-  async listForOwner(ownerId: string): Promise<Agent[]> {
-    const apps = k8sApps()
-    const ns = ownerNamespace(ownerId)
     const res = await apps
       .listNamespacedStatefulSet({
-        namespace: ns,
+        namespace: RESOURCE_NS,
         labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE}`,
       })
       .catch((err: { code?: number; statusCode?: number }) => {
@@ -131,6 +113,22 @@ export class AgentsService {
     return (res.items ?? []).map((sts) => this.toAgent(sts))
   }
 
+  async listForOwner(ownerId: string): Promise<Agent[]> {
+    const slugs = await this.fga.listAccessibleAgents(ownerId)
+    if (slugs.length === 0) return []
+    const apps = k8sApps()
+    const results = await Promise.all(
+      slugs.map((slug) =>
+        apps
+          .readNamespacedStatefulSet({ name: slug, namespace: RESOURCE_NS })
+          .catch(() => null),
+      ),
+    )
+    return results
+      .filter((sts): sts is NonNullable<typeof sts> => sts !== null)
+      .map((sts) => this.toAgent(sts))
+  }
+
   async create(ownerId: string, input: CreateAgentInput): Promise<Agent> {
     const displayName = input.name.trim()
     if (!displayName) throw new BadRequestException("name is required")
@@ -138,11 +136,11 @@ export class AgentsService {
       throw new BadRequestException("name must be 200 characters or fewer")
     }
     const slug = randomSlug()
-    const ns = ownerNamespace(ownerId)
+    const ns = RESOURCE_NS
     const image = this.requireImage()
     const storage = input.storageSize ?? "10Gi"
 
-    await this.ensureNamespace(ns, ownerId)
+    await this.ensureNamespace(ns)
 
     if (this.authForwardUrl) {
       await this.ensureAuthMiddleware(
@@ -270,7 +268,11 @@ export class AgentsService {
   async delete(ownerId: string, slug: string): Promise<void> {
     const cleanSlug = sanitizeLabel(slug)
     if (!cleanSlug) throw new BadRequestException("Invalid agent slug.")
-    const ns = ownerNamespace(ownerId)
+    const allowed = await this.fga.canAccessAgent(ownerId, cleanSlug)
+    if (!allowed) {
+      throw new NotFoundException(`Agent "${cleanSlug}" not found.`)
+    }
+    const ns = RESOURCE_NS
     const apps = k8sApps()
     const core = k8sCore()
     await apps
@@ -414,7 +416,7 @@ export class AgentsService {
     })
   }
 
-  private async ensureNamespace(ns: string, ownerId: string): Promise<void> {
+  private async ensureNamespace(ns: string): Promise<void> {
     const core = k8sCore()
     try {
       await core.readNamespace({ name: ns })
@@ -426,15 +428,7 @@ export class AgentsService {
       if (code !== 404) throw err
     }
     await core.createNamespace({
-      body: {
-        metadata: {
-          name: ns,
-          labels: {
-            [AGENT_LABEL]: "agent-namespace",
-            [AGENT_OWNER_LABEL]: sanitizeLabel(ownerId),
-          },
-        },
-      },
+      body: { metadata: { name: ns } },
     })
   }
 
