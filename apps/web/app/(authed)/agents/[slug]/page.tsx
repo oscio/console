@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 import { fetchAgents, type Agent, type AgentStatus } from "@/lib/api"
+import { AutoRefresh } from "@/components/auto-refresh"
 import { ChatCircle, Cube } from "@phosphor-icons/react/dist/ssr"
 
 export default async function AgentDetailPage({
@@ -34,6 +35,7 @@ export default async function AgentDetailPage({
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div>
         <Link
           href="/agents"

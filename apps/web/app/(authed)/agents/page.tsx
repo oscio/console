@@ -18,6 +18,7 @@ import {
   deleteAgent,
   fetchAgents,
 } from "@/lib/api"
+import { AutoRefresh } from "@/components/auto-refresh"
 import { DeleteAgentButton, NewAgentForm } from "./new-agent-form"
 
 async function createAgentAction(formData: FormData) {
@@ -49,6 +50,7 @@ export default async function AgentsPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Agents</h1>
