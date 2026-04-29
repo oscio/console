@@ -7,5 +7,6 @@ import { LoadBalancersService } from "./loadbalancers.service"
   imports: [OpenFgaModule],
   controllers: [LoadBalancersController],
   providers: [LoadBalancersService],
+  exports: [LoadBalancersService],
 })
 export class LoadBalancersModule {}

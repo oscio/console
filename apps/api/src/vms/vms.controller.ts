@@ -103,6 +103,16 @@ export class VmsController {
     if (!new Set(["new", "attach", "none"]).has(volumeMode)) {
       throw new BadRequestException("volumeMode must be 'new', 'attach', or 'none'")
     }
+    const loadBalancers = Array.isArray(body.loadBalancers)
+      ? body.loadBalancers.map((lb) => {
+          const item = lb as Record<string, unknown>
+          return {
+            name: typeof item.name === "string" ? item.name : undefined,
+            port: Number(item.port),
+            persistOnVmDelete: !!item.persistOnVmDelete,
+          }
+        })
+      : undefined
     return this.vms.create(session.user.id, {
       name,
       imageType,
@@ -115,12 +125,7 @@ export class VmsController {
         body.volumeSizeGi != null ? Number(body.volumeSizeGi) : undefined,
       persistVolumeOnDelete: !!body.persistVolumeOnDelete,
       volumeSlug: body.volumeSlug,
-      loadBalancerPort:
-        body.loadBalancerPort != null
-          ? Number(body.loadBalancerPort)
-          : undefined,
-      loadBalancerName: body.loadBalancerName,
-      loadBalancerPersistOnVmDelete: !!body.loadBalancerPersistOnVmDelete,
+      loadBalancers,
     })
   }
 

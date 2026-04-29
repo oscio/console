@@ -37,12 +37,33 @@ async function createVmAction(formData: FormData) {
   const volumeSizeGi = volumeSizeGiRaw ? Number(volumeSizeGiRaw) : undefined
   const persistVolumeOnDelete = formData.get("persistVolumeOnDelete") === "true"
   const volumeSlug = String(formData.get("volumeSlug") ?? "").trim() || undefined
-  const lbMode = String(formData.get("loadBalancerMode") ?? "none")
-  const lbPortRaw = String(formData.get("loadBalancerPort") ?? "")
-  const loadBalancerPort =
-    lbMode === "new" && lbPortRaw ? Number(lbPortRaw) : undefined
-  const loadBalancerPersistOnVmDelete =
-    formData.get("loadBalancerPersistOnVmDelete") === "true"
+  const lbsRaw = String(formData.get("loadBalancers") ?? "[]")
+  let loadBalancers: Array<{
+    name?: string
+    port: number
+    persistOnVmDelete?: boolean
+  }> = []
+  try {
+    const parsed = JSON.parse(lbsRaw) as unknown
+    if (Array.isArray(parsed)) {
+      for (const it of parsed) {
+        const obj = it as Record<string, unknown>
+        const port = Number(obj.port)
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          return { error: "load balancer port must be an integer 1-65535" }
+        }
+        loadBalancers.push({
+          name: typeof obj.name === "string" && obj.name.trim()
+            ? obj.name.trim()
+            : undefined,
+          port,
+          persistOnVmDelete: !!obj.persistOnVmDelete,
+        })
+      }
+    }
+  } catch {
+    return { error: "invalid load balancers payload" }
+  }
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -55,8 +76,7 @@ async function createVmAction(formData: FormData) {
       volumeSizeGi,
       persistVolumeOnDelete,
       volumeSlug,
-      loadBalancerPort,
-      loadBalancerPersistOnVmDelete,
+      loadBalancers: loadBalancers.length ? loadBalancers : undefined,
     })
   } catch (err) {
     return { error: (err as Error).message }

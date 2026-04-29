@@ -324,15 +324,21 @@ export class VmsService {
       await this.ensureHttpRoute(ns, slug, "vnc", 6901)
     }
 
-    // Optional convenience LB attached at create time. Failure here
-    // is best-effort — the VM is already up. We surface the failure
-    // by throwing, but the user can also create LBs from /loadbalancers.
-    if (input.loadBalancerPort && input.loadBalancerPort > 0) {
+    // Optional convenience LBs attached at create time. One create
+    // per entry, sequential so 409s don't overlap. Failure throws —
+    // the VM is already up at this point but the caller should know
+    // the LB step partially failed.
+    for (const lb of input.loadBalancers ?? []) {
+      if (!Number.isInteger(lb.port) || lb.port < 1 || lb.port > 65535) {
+        throw new BadRequestException(
+          `loadBalancer port must be an integer 1-65535 (got ${lb.port})`,
+        )
+      }
       await this.loadBalancers.create(ownerId, {
-        name: input.loadBalancerName?.trim() || `${displayName} LB`,
+        name: lb.name?.trim() || `${displayName} :${lb.port}`,
         vmSlug: slug,
-        port: input.loadBalancerPort,
-        persistOnVmDelete: !!input.loadBalancerPersistOnVmDelete,
+        port: lb.port,
+        persistOnVmDelete: !!lb.persistOnVmDelete,
       })
     }
 

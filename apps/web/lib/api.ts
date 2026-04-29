@@ -139,9 +139,11 @@ export async function createVm(
     volumeSizeGi?: number
     persistVolumeOnDelete?: boolean
     volumeSlug?: string
-    loadBalancerPort?: number
-    loadBalancerName?: string
-    loadBalancerPersistOnVmDelete?: boolean
+    loadBalancers?: Array<{
+      name?: string
+      port: number
+      persistOnVmDelete?: boolean
+    }>
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {

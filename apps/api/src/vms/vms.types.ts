@@ -59,13 +59,17 @@ export type CreateVmInput = {
   // For "attach": slug of the existing free volume.
   volumeSlug?: string
 
-  // Optional convenience LB. When `loadBalancerPort > 0`, the api
-  // also creates a LoadBalancer pointing at the new VM. Mode is
-  // either "none" (default) or "new"; "attach" doesn't apply
-  // because each LB Service has a unique selector.
-  loadBalancerPort?: number
-  loadBalancerName?: string
-  loadBalancerPersistOnVmDelete?: boolean
+  // Optional convenience LBs. The api creates one LoadBalancer per
+  // entry pointing at the new VM. Empty/undefined = no LBs at create
+  // time (users can still add them from /loadbalancers).
+  loadBalancers?: Array<{
+    // Display name. Falls back to "<vm-name> :<port>" on the api when blank.
+    name?: string
+    port: number
+    // When true the LB outlives the VM and shows up under
+    // /loadbalancers (Pending until re-pointed). Default: cascade-delete.
+    persistOnVmDelete?: boolean
+  }>
 }
 
 // Defaults shown in the UI as "Recommended" + applied when caller

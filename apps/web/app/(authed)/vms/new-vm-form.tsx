@@ -55,13 +55,42 @@ export function NewVmForm({
   const [persist, setPersist] = useState(false)
   const [attachSlug, setAttachSlug] = useState<string>(freeVolumes[0]?.slug ?? "")
 
-  // Load Balancer mode: "none" (default) or "new". No "attach"
-  // because each LB Service has a unique selector — attaching
-  // would mean re-pointing the existing LB at this VM, which is
-  // a separate flow on /loadbalancers.
-  const [lbMode, setLbMode] = useState<"none" | "new">("none")
-  const [lbPort, setLbPort] = useState(3000)
-  const [lbPersist, setLbPersist] = useState(false)
+  // Multiple LBs per VM. Each item becomes one ClusterIP Service +
+  // HTTPRoute pair on the api side. `key` is React-only — stripped
+  // before encoding into the hidden `loadBalancers` field.
+  type LbDraft = {
+    key: string
+    name: string
+    port: number
+    persistOnVmDelete: boolean
+  }
+  const [lbs, setLbs] = useState<LbDraft[]>([])
+  const addLb = () =>
+    setLbs((prev) => [
+      ...prev,
+      {
+        key:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`,
+        name: "",
+        port: 3000,
+        persistOnVmDelete: false,
+      },
+    ])
+  const removeLb = (key: string) =>
+    setLbs((prev) => prev.filter((l) => l.key !== key))
+  const updateLb = (key: string, patch: Partial<LbDraft>) =>
+    setLbs((prev) =>
+      prev.map((l) => (l.key === key ? { ...l, ...patch } : l)),
+    )
+  const lbsPayload = JSON.stringify(
+    lbs.map(({ name, port, persistOnVmDelete }) => ({
+      name: name.trim() || undefined,
+      port,
+      persistOnVmDelete,
+    })),
+  )
 
   return (
     <Dialog
@@ -246,59 +275,84 @@ export function NewVmForm({
             )}
           </div>
 
-          {/* Load Balancer (optional, default off). When "new", the
-              api creates an LB at <slug>.lb.<domain> targeting
-              <port>. The persist toggle controls cleanup on VM
-              delete (default: cascade-delete the LB). */}
+          {/* Load Balancers (optional, default empty). Each row becomes
+              an LB at <slug>.lb.<domain> targeting <port>. Persist
+              controls cleanup on VM delete (default: cascade-delete). */}
           <div className="space-y-3">
-            <Label htmlFor="vm-lb-mode">Load Balancer</Label>
-            <input type="hidden" name="loadBalancerMode" value={lbMode} />
-            <Select
-              value={lbMode}
-              onValueChange={(v) => setLbMode(v as "none" | "new")}
-            >
-              <SelectTrigger id="vm-lb-mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No load balancer</SelectItem>
-                <SelectItem value="new">Create new</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-baseline justify-between gap-2">
+              <Label>Load Balancers</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={addLb}
+              >
+                Add load balancer
+              </Button>
+            </div>
+            <input type="hidden" name="loadBalancers" value={lbsPayload} />
 
-            {lbMode === "new" && (
-              <div className="space-y-3">
+            {lbs.length === 0 && (
+              <p className="text-muted-foreground text-xs">
+                None. Each LB gets its own{" "}
+                <code>&lt;slug&gt;.lb.&lt;domain&gt;</code> hostname pointing
+                at the VM port you choose.
+              </p>
+            )}
+
+            {lbs.map((lb, idx) => (
+              <div
+                key={lb.key}
+                className="space-y-3 border p-3"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground text-xs font-mono">
+                    LB #{idx + 1}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => removeLb(lb.key)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    Remove
+                  </Button>
+                </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="vm-lb-port" className="text-xs">
+                  <Label htmlFor={`vm-lb-${lb.key}-name`} className="text-xs">
+                    Name <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Input
+                    id={`vm-lb-${lb.key}-name`}
+                    value={lb.name}
+                    onChange={(e) => updateLb(lb.key, { name: e.target.value })}
+                    placeholder="auto: <vm-name> :<port>"
+                    maxLength={200}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`vm-lb-${lb.key}-port`} className="text-xs">
                     Target port
                   </Label>
-                  <input
-                    type="hidden"
-                    name="loadBalancerPort"
-                    value={lbPort}
-                  />
                   <Input
-                    id="vm-lb-port"
+                    id={`vm-lb-${lb.key}-port`}
                     type="number"
                     min={1}
                     max={65535}
-                    value={lbPort}
+                    value={lb.port}
                     onChange={(e) =>
-                      setLbPort(Number(e.target.value) || 0)
+                      updateLb(lb.key, { port: Number(e.target.value) || 0 })
                     }
                   />
-                  <p className="text-muted-foreground text-xs">
-                    Port your service listens on inside the VM. URL becomes
-                    <code> https://&lt;slug&gt;.lb.&lt;domain&gt;</code>.
-                  </p>
                 </div>
                 <label className="flex items-start gap-2 text-sm">
                   <input
                     type="checkbox"
-                    name="loadBalancerPersistOnVmDelete"
-                    value="true"
-                    checked={lbPersist}
-                    onChange={(e) => setLbPersist(e.target.checked)}
+                    checked={lb.persistOnVmDelete}
+                    onChange={(e) =>
+                      updateLb(lb.key, { persistOnVmDelete: e.target.checked })
+                    }
                     className="mt-1"
                   />
                   <span>
@@ -311,7 +365,7 @@ export function NewVmForm({
                   </span>
                 </label>
               </div>
-            )}
+            ))}
           </div>
 
           {error && (
