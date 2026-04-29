@@ -82,9 +82,11 @@ export const VM_DEFAULTS = {
 } as const
 
 // Pod-spec volume name + mount path used for the VM's data volume.
-// Constants so the service + delete paths agree on what to look for.
+// Path matches agent-sandbox's workspace dir (/home/coder/workspace,
+// owned by UID 1000) — same UID as the agent sidecar so a shared
+// PVC mount works for both containers.
 export const VM_DATA_VOLUME_NAME = "data"
-export const VM_DATA_MOUNT_PATH = "/home/agent"
+export const VM_DATA_MOUNT_PATH = "/home/coder/workspace"
 
 // Annotations the api stamps on the StatefulSet so VM delete knows
 // whether the bound PVC should be cleaned up or left for re-attach.

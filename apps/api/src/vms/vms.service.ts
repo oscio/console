@@ -322,9 +322,11 @@ export class VmsService {
           { name: "SSH_PORT", value: "22" },
           { name: "SSH_USER", value: "coder" },
           { name: "SSH_KEY", value: "/etc/agent-ssh/id_ed25519" },
-          // Agent state lives under the workspace PVC (same path as
-          // the workspace container sees it) so context survives
-          // pod restarts and is co-located with the project files.
+          // Agent state lives under the workspace PVC at the SAME
+          // path the workspace container sees (VM_DATA_MOUNT_PATH).
+          // The wrapper writes $WORKSPACE/.agent/sessions etc.; both
+          // containers (UID 1000 on both sides) read/write the same
+          // files.
           { name: "WORKSPACE_DIR", value: VM_DATA_MOUNT_PATH },
           { name: "AGENT_PORT", value: "8000" },
           { name: "AGENT_HOST", value: "0.0.0.0" },
