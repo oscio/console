@@ -286,8 +286,13 @@ export class LoadBalancersService {
     for (const slice of res.items ?? []) {
       const svcName = slice.metadata?.labels?.["kubernetes.io/service-name"]
       if (!svcName) continue
+      // Per the EndpointSlice spec, `conditions.ready` is `treat as
+      // ready when absent`. Strict `=== true` left healthy LBs stuck
+      // on Pending whenever kubelet/EndpointSlice controller didn't
+      // bother stamping the field. Accept "anything not explicitly
+      // false" as ready.
       const ready = (slice.endpoints ?? []).some(
-        (e) => e.conditions?.ready === true,
+        (e) => e.conditions?.ready !== false,
       )
       if (ready) map.set(svcName, true)
     }
