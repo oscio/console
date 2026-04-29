@@ -17,6 +17,7 @@ import {
   fetchVms,
   type LoadBalancerStatus,
 } from "@/lib/api"
+import { AutoRefresh } from "@/components/auto-refresh"
 import {
   DeleteLoadBalancerButton,
   NewLoadBalancerForm,
@@ -65,6 +66,7 @@ export default async function LoadBalancersPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Load Balancers</h1>

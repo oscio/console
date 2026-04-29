@@ -21,6 +21,7 @@ import {
   type VmStatus,
   type VmVolumeMode,
 } from "@/lib/api"
+import { AutoRefresh } from "@/components/auto-refresh"
 import { DeleteVmButton, NewVmForm } from "./new-vm-form"
 
 async function createVmAction(formData: FormData) {
@@ -86,6 +87,7 @@ export default async function VmsPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">VMs</h1>

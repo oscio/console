@@ -16,6 +16,7 @@ import {
   fetchVolumes,
   type VolumeStatus,
 } from "@/lib/api"
+import { AutoRefresh } from "@/components/auto-refresh"
 import { DeleteVolumeButton, NewVolumeForm } from "./new-volume-form"
 
 async function createVolumeAction(formData: FormData) {
@@ -50,6 +51,7 @@ export default async function VolumesPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Volumes</h1>
