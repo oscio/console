@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common"
 import { authPool } from "@workspace/auth"
 import { OpenFgaService } from "../openfga/openfga.service"
-import { k8sCore } from "../vms/k8s.client"
+import { k8sApps, k8sCore, k8sCustom } from "../vms/k8s.client"
 import { RESOURCE_NS } from "../vms/vms.service"
 import {
   CreateVolumeInput,
@@ -159,12 +159,23 @@ export class VolumesService {
     // Refuse to delete a bound volume — the user should detach (delete
     // the VM) first. K8s would queue the PVC for deletion otherwise,
     // which surprises users.
+    //
+    // Exception: if the boundTo VM is "abandoned" (no FGA owners —
+    // i.e. left over from a partial create where grantVmOwner never
+    // ran), self-heal: unbind the volume and clean up the orphaned
+    // VM resources directly. The volume's owner is the only legitimate
+    // stakeholder at that point.
     const list = await this.listForOwner(ownerId)
     const v = list.find((x) => x.slug === cleanSlug)
     if (v?.boundTo) {
-      throw new ConflictException(
-        `Volume "${cleanSlug}" is bound to VM "${v.boundTo}". Delete the VM first.`,
-      )
+      const orphan = await this.isAbandonedVm(v.boundTo)
+      if (!orphan) {
+        throw new ConflictException(
+          `Volume "${cleanSlug}" is bound to VM "${v.boundTo}". Delete the VM first.`,
+        )
+      }
+      await this.unbindFromVm(ownerId, cleanSlug).catch(() => undefined)
+      await this.cleanupAbandonedVm(v.boundTo)
     }
     await core
       .deleteNamespacedPersistentVolumeClaim({ name: cleanSlug, namespace: ns })
@@ -217,6 +228,43 @@ export class VolumesService {
         body: [{ op: "remove", path: `/metadata/labels${path}` }] as unknown as object,
       })
       .catch(() => undefined)
+  }
+
+  // True when the named VM has no FGA owner tuples — i.e. nobody
+  // claims it. Either the VM never finished its create (grantVmOwner
+  // never ran) or the tuple was cleaned out manually. Volume delete
+  // uses this to decide whether to self-heal.
+  private async isAbandonedVm(vmSlug: string): Promise<boolean> {
+    const owners = await this.fga.listVmOwners(vmSlug).catch(() => null)
+    if (owners === null) return false
+    return owners.length === 0
+  }
+
+  // Best-effort cleanup of an abandoned VM's k8s resources. Mirrors
+  // VmsService.delete's k8s teardown but skips the FGA / volume /
+  // LB cascade (no owner means no LBs were ever granted; the volume
+  // is the caller's, already being unbound by the caller).
+  private async cleanupAbandonedVm(vmSlug: string): Promise<void> {
+    const apps = k8sApps()
+    const core = k8sCore()
+    const custom = k8sCustom()
+    await apps
+      .deleteNamespacedStatefulSet({ name: vmSlug, namespace: RESOURCE_NS })
+      .catch(() => undefined)
+    await core
+      .deleteNamespacedService({ name: vmSlug, namespace: RESOURCE_NS })
+      .catch(() => undefined)
+    for (const svc of ["term", "code", "vnc"]) {
+      await custom
+        .deleteNamespacedCustomObject({
+          group: "gateway.networking.k8s.io",
+          version: "v1",
+          namespace: RESOURCE_NS,
+          plural: "httproutes",
+          name: `${vmSlug}-${svc}`,
+        })
+        .catch(() => undefined)
+    }
   }
 
   async canAccessByEmail(email: string, slug: string): Promise<boolean> {

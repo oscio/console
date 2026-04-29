@@ -118,6 +118,15 @@ export class LoadBalancersService {
     const slug = randomSlug()
     const ns = RESOURCE_NS
 
+    // Stamp the FGA owner tuple BEFORE any k8s ops. If Service/
+    // HTTPRoute create fails partway, the user can still see the LB
+    // in /loadbalancers and run delete to clean up.
+    await this.fga.grantLoadBalancerOwner(slug, ownerId).catch((err) => {
+      throw new Error(
+        `Failed to grant LB owner tuple for ${slug}: ${(err as Error).message}`,
+      )
+    })
+
     // Service: ClusterIP, selects the VM pod by vm-slug label.
     const core = k8sCore()
     try {
@@ -212,8 +221,6 @@ export class LoadBalancersService {
         .catch(() => undefined)
       rethrowK8sError(err, `Failed to create HTTPRoute for "${slug}"`)
     }
-
-    await this.fga.grantLoadBalancerOwner(slug, ownerId).catch(() => undefined)
 
     const list = await this.listForOwner(ownerId)
     const created = list.find((x) => x.slug === slug)

@@ -162,6 +162,16 @@ export class VmsService {
     const cpu = input.cpuRequest ?? VM_DEFAULTS.cpu
     const memory = input.memoryRequest ?? VM_DEFAULTS.memory
 
+    // Stamp the FGA owner tuple BEFORE any k8s ops. If anything
+    // downstream throws partway, the user can still see the VM in
+    // /vms (when STS exists) and run delete to clean up. Granting
+    // late is what produced "ghost" VMs we had to chase by hand.
+    await this.fga.grantVmOwner(slug, ownerId).catch((err) => {
+      throw new Error(
+        `Failed to grant VM owner tuple for ${slug}: ${(err as Error).message}`,
+      )
+    })
+
     // Idempotent: ensures the unified namespace exists on first
     // create after a fresh deploy. Cheap on subsequent calls.
     await this.ensureNamespace(ns)
@@ -333,18 +343,6 @@ export class VmsService {
     if (input.imageType === "desktop") {
       await this.ensureHttpRoute(ns, slug, "vnc", 6901)
     }
-
-    // Stamp the OpenFGA ownership tuple BEFORE creating any LBs. The
-    // LB create flow does its own `canAccessVm` check on the target,
-    // so the tuple has to exist by then. Also drives the per-VM
-    // ForwardAuth check (/vms/auth) for VM hostnames.
-    await this.fga.grantVmOwner(slug, ownerId).catch((err) => {
-      // Don't roll back the K8s resources — owner can still delete via
-      // the slug from the API. Log and surface the failure.
-      throw new Error(
-        `VM ${slug} created but FGA owner tuple write failed: ${(err as Error).message}`,
-      )
-    })
 
     // Optional convenience LBs attached at create time. One create
     // per entry, sequential so 409s don't overlap. Failure throws —

@@ -140,6 +140,14 @@ export class AgentsService {
     const image = this.requireImage()
     const storage = input.storageSize ?? "10Gi"
 
+    // Grant FGA owner tuple first so a partial create still surfaces
+    // in /agents and can be cleaned up via the normal delete flow.
+    await this.fga.grantAgentOwner(slug, ownerId).catch((err) => {
+      throw new Error(
+        `Failed to grant agent owner tuple for ${slug}: ${(err as Error).message}`,
+      )
+    })
+
     await this.ensureNamespace(ns)
 
     if (this.authForwardUrl) {
@@ -238,12 +246,6 @@ export class AgentsService {
     // Single HTTPRoute → port 8000. Hostname is `<slug>.<agentsDomain>`
     // (no service suffix — there is only one service).
     await this.ensureHttpRoute(ns, slug)
-
-    await this.fga.grantAgentOwner(slug, ownerId).catch((err) => {
-      throw new Error(
-        `Agent ${slug} created but FGA owner tuple write failed: ${(err as Error).message}`,
-      )
-    })
 
     const agents = await this.listForOwner(ownerId)
     const created = agents.find((a) => a.slug === slug)
