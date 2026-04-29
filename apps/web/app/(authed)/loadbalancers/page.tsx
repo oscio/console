@@ -33,8 +33,14 @@ async function createAction(formData: FormData) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return { error: "port must be an integer 1-65535" }
   }
+  const persistOnVmDelete = formData.get("persistOnVmDelete") === "true"
   try {
-    await createLoadBalancer(cookieHeader, { name, vmSlug, port })
+    await createLoadBalancer(cookieHeader, {
+      name,
+      vmSlug,
+      port,
+      persistOnVmDelete,
+    })
   } catch (err) {
     return { error: (err as Error).message }
   }

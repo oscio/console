@@ -16,6 +16,7 @@ import {
   LB_LABEL,
   LB_LABEL_VALUE,
   LB_OWNER_LABEL,
+  LB_PERSIST_ON_VM_DELETE_ANNOTATION,
   LB_PORT_ANNOTATION,
   LB_VM_LABEL,
 } from "./loadbalancers.types"
@@ -130,6 +131,8 @@ export class LoadBalancersService {
             annotations: {
               [LB_PORT_ANNOTATION]: String(input.port),
               [LB_DISPLAY_NAME_ANNOTATION]: displayName,
+              [LB_PERSIST_ON_VM_DELETE_ANNOTATION]:
+                input.persistOnVmDelete ? "true" : "false",
             },
           },
           spec: {
@@ -171,6 +174,8 @@ export class LoadBalancersService {
             annotations: {
               [LB_PORT_ANNOTATION]: String(input.port),
               [LB_DISPLAY_NAME_ANNOTATION]: displayName,
+              [LB_PERSIST_ON_VM_DELETE_ANNOTATION]:
+                input.persistOnVmDelete ? "true" : "false",
             },
           },
           spec: {
@@ -233,6 +238,33 @@ export class LoadBalancersService {
       .catch(() => [])
     for (const u of owners) {
       await this.fga.revokeLoadBalancerOwner(cleanSlug, u).catch(() => undefined)
+    }
+  }
+
+  // Called from vms.service.delete: removes every LB targeting the
+  // VM that wasn't created with the "persist on VM delete" flag.
+  // Returns the list of LBs the caller may want to surface as
+  // "kept" (persisted ones outlive the VM and become broken until
+  // re-pointed; we leave them visible under /loadbalancers).
+  async cascadeDeleteForVm(ownerId: string, vmSlug: string): Promise<void> {
+    const ns = ownerNamespace(ownerId)
+    const custom = k8sCustom()
+    const res = (await custom
+      .listNamespacedCustomObject({
+        group: "gateway.networking.k8s.io",
+        version: "v1",
+        namespace: ns,
+        plural: "httproutes",
+        labelSelector: `${LB_LABEL}=${LB_LABEL_VALUE},${LB_VM_LABEL}=${sanitizeLabel(vmSlug)}`,
+      })
+      .catch(() => ({ items: [] }))) as { items?: HttpRouteShape[] }
+    for (const r of res.items ?? []) {
+      const persist =
+        r.metadata?.annotations?.[LB_PERSIST_ON_VM_DELETE_ANNOTATION] === "true"
+      if (persist) continue
+      const slug = r.metadata?.name
+      if (!slug) continue
+      await this.delete(ownerId, slug).catch(() => undefined)
     }
   }
 

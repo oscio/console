@@ -139,6 +139,9 @@ export async function createVm(
     volumeSizeGi?: number
     persistVolumeOnDelete?: boolean
     volumeSlug?: string
+    loadBalancerPort?: number
+    loadBalancerName?: string
+    loadBalancerPersistOnVmDelete?: boolean
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {
@@ -338,7 +341,12 @@ export async function fetchLoadBalancers(
 
 export async function createLoadBalancer(
   cookieHeader: string,
-  input: { name: string; vmSlug: string; port: number },
+  input: {
+    name: string
+    vmSlug: string
+    port: number
+    persistOnVmDelete?: boolean
+  },
 ): Promise<LoadBalancer> {
   const res = await fetch(`${API_URL}/loadbalancers`, {
     method: "POST",

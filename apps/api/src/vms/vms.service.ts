@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common"
 import { randomBytes } from "node:crypto"
 import { authPool } from "@workspace/auth"
+import { LoadBalancersService } from "../loadbalancers/loadbalancers.service"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { VolumesService } from "../volumes/volumes.service"
 import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
@@ -78,6 +79,7 @@ export class VmsService {
   constructor(
     private readonly fga: OpenFgaService,
     private readonly volumes: VolumesService,
+    private readonly loadBalancers: LoadBalancersService,
   ) {}
 
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
@@ -322,6 +324,18 @@ export class VmsService {
       await this.ensureHttpRoute(ns, slug, "vnc", 6901)
     }
 
+    // Optional convenience LB attached at create time. Failure here
+    // is best-effort — the VM is already up. We surface the failure
+    // by throwing, but the user can also create LBs from /loadbalancers.
+    if (input.loadBalancerPort && input.loadBalancerPort > 0) {
+      await this.loadBalancers.create(ownerId, {
+        name: input.loadBalancerName?.trim() || `${displayName} LB`,
+        vmSlug: slug,
+        port: input.loadBalancerPort,
+        persistOnVmDelete: !!input.loadBalancerPersistOnVmDelete,
+      })
+    }
+
     // Stamp the OpenFGA ownership tuple. This is what the per-VM
     // ForwardAuth check (/vms/auth) reads to decide whether a logged-
     // in user can reach this VM's URLs.
@@ -401,6 +415,10 @@ export class VmsService {
         await this.volumes.delete(ownerId, boundVolume).catch(() => undefined)
       }
     }
+    // LB cleanup: cascade-delete every LB targeting this VM that
+    // wasn't created with `persistOnVmDelete`. Persisted LBs stay
+    // on /loadbalancers (they'll go Pending until re-pointed).
+    await this.loadBalancers.cascadeDeleteForVm(ownerId, cleanSlug)
     // Tear down per-service HTTPRoutes — term/code always, vnc when present.
     for (const svc of ["term", "code", "vnc"]) {
       await this.deleteHttpRoute(ns, `${cleanSlug}-${svc}`).catch(

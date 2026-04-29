@@ -36,6 +36,12 @@ async function createVmAction(formData: FormData) {
   const volumeSizeGi = volumeSizeGiRaw ? Number(volumeSizeGiRaw) : undefined
   const persistVolumeOnDelete = formData.get("persistVolumeOnDelete") === "true"
   const volumeSlug = String(formData.get("volumeSlug") ?? "").trim() || undefined
+  const lbMode = String(formData.get("loadBalancerMode") ?? "none")
+  const lbPortRaw = String(formData.get("loadBalancerPort") ?? "")
+  const loadBalancerPort =
+    lbMode === "new" && lbPortRaw ? Number(lbPortRaw) : undefined
+  const loadBalancerPersistOnVmDelete =
+    formData.get("loadBalancerPersistOnVmDelete") === "true"
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -48,12 +54,15 @@ async function createVmAction(formData: FormData) {
       volumeSizeGi,
       persistVolumeOnDelete,
       volumeSlug,
+      loadBalancerPort,
+      loadBalancerPersistOnVmDelete,
     })
   } catch (err) {
     return { error: (err as Error).message }
   }
   revalidatePath("/vms")
   revalidatePath("/volumes")
+  revalidatePath("/loadbalancers")
 }
 
 async function deleteVmAction(formData: FormData) {
@@ -63,6 +72,8 @@ async function deleteVmAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   await deleteVm(cookieHeader, slug)
   revalidatePath("/vms")
+  revalidatePath("/volumes")
+  revalidatePath("/loadbalancers")
 }
 
 export default async function VmsPage() {

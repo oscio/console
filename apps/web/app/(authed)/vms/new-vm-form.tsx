@@ -55,6 +55,14 @@ export function NewVmForm({
   const [persist, setPersist] = useState(false)
   const [attachSlug, setAttachSlug] = useState<string>(freeVolumes[0]?.slug ?? "")
 
+  // Load Balancer mode: "none" (default) or "new". No "attach"
+  // because each LB Service has a unique selector — attaching
+  // would mean re-pointing the existing LB at this VM, which is
+  // a separate flow on /loadbalancers.
+  const [lbMode, setLbMode] = useState<"none" | "new">("none")
+  const [lbPort, setLbPort] = useState(3000)
+  const [lbPersist, setLbPersist] = useState(false)
+
   return (
     <Dialog
       open={open}
@@ -235,6 +243,74 @@ export function NewVmForm({
                 The pod's <code>/home/agent</code> lives on the container's
                 ephemeral filesystem; everything is lost on pod restart.
               </p>
+            )}
+          </div>
+
+          {/* Load Balancer (optional, default off). When "new", the
+              api creates an LB at <slug>.lb.<domain> targeting
+              <port>. The persist toggle controls cleanup on VM
+              delete (default: cascade-delete the LB). */}
+          <div className="space-y-3">
+            <Label htmlFor="vm-lb-mode">Load Balancer</Label>
+            <input type="hidden" name="loadBalancerMode" value={lbMode} />
+            <Select
+              value={lbMode}
+              onValueChange={(v) => setLbMode(v as "none" | "new")}
+            >
+              <SelectTrigger id="vm-lb-mode" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No load balancer</SelectItem>
+                <SelectItem value="new">Create new</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {lbMode === "new" && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="vm-lb-port" className="text-xs">
+                    Target port
+                  </Label>
+                  <input
+                    type="hidden"
+                    name="loadBalancerPort"
+                    value={lbPort}
+                  />
+                  <Input
+                    id="vm-lb-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={lbPort}
+                    onChange={(e) =>
+                      setLbPort(Number(e.target.value) || 0)
+                    }
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    Port your service listens on inside the VM. URL becomes
+                    <code> https://&lt;slug&gt;.lb.&lt;domain&gt;</code>.
+                  </p>
+                </div>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="loadBalancerPersistOnVmDelete"
+                    value="true"
+                    checked={lbPersist}
+                    onChange={(e) => setLbPersist(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    Persist on VM delete
+                    <span className="text-muted-foreground ml-2 text-xs">
+                      Default: cascade-delete with VM. Persisted LBs stay
+                      under <code>/loadbalancers</code> (Pending until
+                      re-pointed).
+                    </span>
+                  </span>
+                </label>
+              </div>
             )}
           </div>
 

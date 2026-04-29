@@ -115,6 +115,12 @@ export class VmsController {
         body.volumeSizeGi != null ? Number(body.volumeSizeGi) : undefined,
       persistVolumeOnDelete: !!body.persistVolumeOnDelete,
       volumeSlug: body.volumeSlug,
+      loadBalancerPort:
+        body.loadBalancerPort != null
+          ? Number(body.loadBalancerPort)
+          : undefined,
+      loadBalancerName: body.loadBalancerName,
+      loadBalancerPersistOnVmDelete: !!body.loadBalancerPersistOnVmDelete,
     })
   }
 

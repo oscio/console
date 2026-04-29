@@ -38,7 +38,12 @@ export class LoadBalancersController {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new BadRequestException("port must be an integer 1-65535")
     }
-    return this.lbs.create(session.user.id, { name, vmSlug, port })
+    return this.lbs.create(session.user.id, {
+      name,
+      vmSlug,
+      port,
+      persistOnVmDelete: !!body.persistOnVmDelete,
+    })
   }
 
   @Delete(":slug")

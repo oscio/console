@@ -58,6 +58,14 @@ export type CreateVmInput = {
   persistVolumeOnDelete?: boolean
   // For "attach": slug of the existing free volume.
   volumeSlug?: string
+
+  // Optional convenience LB. When `loadBalancerPort > 0`, the api
+  // also creates a LoadBalancer pointing at the new VM. Mode is
+  // either "none" (default) or "new"; "attach" doesn't apply
+  // because each LB Service has a unique selector.
+  loadBalancerPort?: number
+  loadBalancerName?: string
+  loadBalancerPersistOnVmDelete?: boolean
 }
 
 // Defaults shown in the UI as "Recommended" + applied when caller
