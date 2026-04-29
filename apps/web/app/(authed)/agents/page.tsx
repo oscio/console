@@ -25,7 +25,7 @@ async function createAgentAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
   const agentType = String(formData.get("agentType") ?? "hermes") as AgentType
-  const storageSize = String(formData.get("storageSize") ?? "10Gi").trim()
+  const storageSize = String(formData.get("storageSize") ?? "1Gi").trim()
   if (!name) return { error: "name is required" }
   try {
     await createAgent(cookieHeader, { name, agentType, storageSize })
@@ -66,7 +66,7 @@ export default async function AgentsPage() {
           Not authenticated against the Agents API.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-md border">
+        <div className="overflow-hidden border">
           <Table>
             <TableHeader>
               <TableRow>

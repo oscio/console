@@ -3,6 +3,16 @@
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@workspace/ui/components/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@workspace/ui/components/dialog"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import {
@@ -12,16 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@workspace/ui/components/sheet"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -35,29 +35,29 @@ export function NewAgentForm({ action }: { action: Action }) {
   const [agentType, setAgentType] = useState<"hermes" | "zeroclaw">("hermes")
 
   return (
-    <Sheet
+    <Dialog
       open={open}
       onOpenChange={(o) => {
         setOpen(o)
         if (!o) setError(null)
       }}
     >
-      <SheetTrigger asChild>
+      <DialogTrigger asChild>
         <Button>Create Agent</Button>
-      </SheetTrigger>
-      <SheetContent className="flex w-full flex-col gap-0 sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>New Agent</SheetTitle>
-          <SheetDescription>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New Agent</DialogTitle>
+          <DialogDescription>
             Provisions a StatefulSet (1 replica) in the shared{" "}
             <code>resource</code> namespace. Ownership is enforced via
             OpenFGA.
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <form
           id="new-agent-form"
-          className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
+          className="space-y-5 max-h-[70vh] overflow-y-auto overflow-x-hidden px-1"
           action={(fd) =>
             startTransition(async () => {
               setError(null)
@@ -108,38 +108,38 @@ export function NewAgentForm({ action }: { action: Action }) {
           <Field
             id="agent-storage"
             label="Storage"
-            hint="PersistentVolumeClaim size for /home/agent."
+            hint="PVC size for /home/agent/workspace — sessions, config, and any files the agent writes. Conversation history is small (text JSONL); 1Gi is plenty for most uses."
           >
             <Input
               id="agent-storage"
               name="storageSize"
-              defaultValue="10Gi"
-              placeholder="10Gi"
+              defaultValue="1Gi"
+              placeholder="1Gi"
             />
           </Field>
 
           {error && (
             <p
               role="alert"
-              className="text-destructive border-destructive/30 bg-destructive/5 rounded-md border px-3 py-2 text-sm"
+              className="text-destructive border-destructive/30 bg-destructive/5 border px-3 py-2 text-sm"
             >
               {error}
             </p>
           )}
         </form>
 
-        <SheetFooter>
-          <SheetClose asChild>
+        <DialogFooter>
+          <DialogClose asChild>
             <Button variant="outline" disabled={pending}>
               Cancel
             </Button>
-          </SheetClose>
+          </DialogClose>
           <Button form="new-agent-form" type="submit" disabled={pending}>
             {pending ? "Creating…" : "Create Agent"}
           </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

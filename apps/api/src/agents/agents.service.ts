@@ -155,7 +155,11 @@ export class AgentsService {
     const slug = randomSlug()
     const ns = RESOURCE_NS
     const image = this.requireImage()
-    const storage = input.storageSize ?? "10Gi"
+    // Sessions + config files only — agents don't typically write
+    // large artifacts to disk. 1Gi is generous for the JSONL event
+    // logs and Hermes/Zeroclaw config dirs combined; users can pick
+    // higher in the create form.
+    const storage = input.storageSize ?? "1Gi"
 
     // Grant FGA owner tuple first so a partial create still surfaces
     // in /agents and can be cleaned up via the normal delete flow.
