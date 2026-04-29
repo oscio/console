@@ -34,6 +34,18 @@ export type Agent = {
 export type CreateAgentInput = {
   name: string
   agentType: AgentType
+  // Optional VM slug to attach to. When set, the agent pod gets the
+  // SSH shim wired (SSH_HOST = <boundToVm>.resource.svc, SSH_KEY =
+  // mounted Secret) and mounts the same workspace PVC the VM does.
+  // Caller (VmsService) is responsible for creating the SSH key
+  // Secret + the workspace PVC mount before calling.
+  boundToVm?: string
+  // Volume claim slug to mount at /home/coder/workspace when bound.
+  // Set together with boundToVm; ignored otherwise.
+  workspaceVolumeSlug?: string
+  // K8s Secret name holding id_ed25519 (private key, mounted on
+  // agent pod) and authorized_keys (public, mounted on VM pod).
+  sshKeySecretName?: string
 }
 
 // Agent-derived label/annotation keys. Mirrors VM_* but keyed under
@@ -43,6 +55,10 @@ export const AGENT_LABEL = "agent-platform/component"
 export const AGENT_LABEL_VALUE = "agent"
 export const AGENT_OWNER_LABEL = "agent-platform/agent-owner"
 export const AGENT_TYPE_LABEL = "agent-platform/agent-type"
+// Set on attached agents. Empty / unset = standalone (headless).
+// Used by listForOwner to populate Agent.boundToVm and by VmsService
+// to find agents to cascade-delete.
+export const AGENT_BOUND_TO_VM_LABEL = "agent-platform/agent-bound-to-vm"
 
 export const AGENT_DISPLAY_NAME_ANNOTATION =
   "agent-platform/agent-display-name"

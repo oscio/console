@@ -12,6 +12,7 @@ import { RESOURCE_NS } from "../vms/vms.service"
 import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
 import {
   Agent,
+  AGENT_BOUND_TO_VM_LABEL,
   AGENT_DISPLAY_NAME_ANNOTATION,
   AGENT_LABEL,
   AGENT_LABEL_VALUE,
@@ -22,13 +23,6 @@ import {
   AgentType,
   CreateAgentInput,
 } from "./agents.types"
-import {
-  VM_AGENT_TYPE_LABEL,
-  VM_DISPLAY_NAME_ANNOTATION,
-  VM_LABEL,
-  VM_LABEL_VALUE,
-  VM_OWNER_LABEL,
-} from "../vms/vms.types"
 
 function sanitizeLabel(value: string): string {
   return value
@@ -105,29 +99,31 @@ export class AgentsService {
     return this.image
   }
 
-  // Admin-only: every agent in the unified resource namespace —
-  // standalone agent StatefulSets AND VM StatefulSets that carry a
-  // sidecar (vm-agent-type label != "none").
+  // Admin-only: every agent in the unified resource namespace.
+  // VM-attached agents are now their own StatefulSets (separate
+  // pods + SSH shim), so a single list selector covers both modes.
   async listAll(): Promise<Agent[]> {
     const apps = k8sApps()
-    const [agentRes, vmRes] = await Promise.all([
-      apps
-        .listNamespacedStatefulSet({
-          namespace: RESOURCE_NS,
-          labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE}`,
-        })
-        .catch(() => ({ items: [] })),
-      apps
-        .listNamespacedStatefulSet({
-          namespace: RESOURCE_NS,
-          labelSelector: `${VM_LABEL}=${VM_LABEL_VALUE},${VM_AGENT_TYPE_LABEL} notin (none)`,
-        })
-        .catch(() => ({ items: [] })),
-    ])
-    return [
-      ...(agentRes.items ?? []),
-      ...(vmRes.items ?? []),
-    ].map((sts) => this.toAgent(sts))
+    const res = await apps
+      .listNamespacedStatefulSet({
+        namespace: RESOURCE_NS,
+        labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE}`,
+      })
+      .catch(() => ({ items: [] }))
+    return (res.items ?? []).map((sts) => this.toAgent(sts))
+  }
+
+  // List all agents attached to a particular VM. Used by VmsService
+  // delete to cascade-clean attached sidecars (now in their own pods).
+  async listForVm(vmSlug: string): Promise<Agent[]> {
+    const apps = k8sApps()
+    const res = await apps
+      .listNamespacedStatefulSet({
+        namespace: RESOURCE_NS,
+        labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE},${AGENT_BOUND_TO_VM_LABEL}=${sanitizeLabel(vmSlug)}`,
+      })
+      .catch(() => ({ items: [] }))
+    return (res.items ?? []).map((sts) => this.toAgent(sts))
   }
 
   async listForOwner(ownerId: string): Promise<Agent[]> {
@@ -183,6 +179,93 @@ export class AgentsService {
 
     await this.ensureService(ns, slug)
 
+    const isBound = !!input.boundToVm
+    if (isBound) {
+      if (!input.workspaceVolumeSlug) {
+        throw new BadRequestException(
+          "boundToVm requires workspaceVolumeSlug — caller must pass the VM's PVC name.",
+        )
+      }
+      if (!input.sshKeySecretName) {
+        throw new BadRequestException(
+          "boundToVm requires sshKeySecretName — caller must create the SSH key Secret.",
+        )
+      }
+    }
+
+    // Two env profiles, two pod-spec profiles:
+    //
+    //   Headless: container fs is the workspace, no PVC, no SSH, no
+    //   pod affinity. Pod restart wipes session state.
+    //
+    //   Bound to VM: SSH shim wrapping bash → workspace pod's sshd
+    //   over the cluster network. Workspace PVC mounted at the same
+    //   path the workspace container sees, so direct fs reads from
+    //   the agent runtime (Claude Code's Read tool, etc.) Just Work.
+    //   podAffinity pins the agent to the VM's node since RWO PVC
+    //   demands it.
+    const env: Array<{ name: string; value: string }> = [
+      { name: "AGENT_OWNER", value: ownerId },
+      { name: "AGENT_SLUG", value: slug },
+      { name: "AGENT_NAME", value: displayName },
+      { name: "AGENT_TYPE", value: input.agentType },
+      { name: "AGENT_PORT", value: String(AGENT_PORT) },
+      { name: "AGENT_HOST", value: "0.0.0.0" },
+    ]
+    let volumeMounts: Array<{ name: string; mountPath: string; readOnly?: boolean }> = []
+    let volumes: Array<Record<string, unknown>> = []
+    let affinity: Record<string, unknown> | undefined
+
+    if (isBound) {
+      env.push(
+        { name: "AGENT_USE_SSH_SHIM", value: "true" },
+        { name: "SSH_HOST", value: `${input.boundToVm}.${RESOURCE_NS}.svc.cluster.local` },
+        { name: "SSH_PORT", value: "22" },
+        { name: "SSH_USER", value: "coder" },
+        { name: "SSH_KEY", value: "/etc/agent-ssh/id_ed25519" },
+        // Same path the VM workspace mounts at. The wrapper's
+        // WORKSPACE_DIR points here so events.jsonl + the user's
+        // project files live on the same disk.
+        { name: "WORKSPACE_DIR", value: "/home/coder/workspace" },
+      )
+      volumeMounts = [
+        { name: "workspace", mountPath: "/home/coder/workspace" },
+        { name: "agent-ssh", mountPath: "/etc/agent-ssh", readOnly: true },
+      ]
+      volumes = [
+        {
+          name: "workspace",
+          persistentVolumeClaim: { claimName: input.workspaceVolumeSlug },
+        },
+        {
+          name: "agent-ssh",
+          secret: {
+            secretName: input.sshKeySecretName,
+            defaultMode: 0o400,
+            items: [{ key: "id_ed25519", path: "id_ed25519" }],
+          },
+        },
+      ]
+      affinity = {
+        podAffinity: {
+          requiredDuringSchedulingIgnoredDuringExecution: [
+            {
+              labelSelector: {
+                matchLabels: { "agent-platform/vm-slug": input.boundToVm },
+              },
+              topologyKey: "kubernetes.io/hostname",
+            },
+          ],
+        },
+      }
+    } else {
+      env.push(
+        { name: "AGENT_USE_SSH_SHIM", value: "false" },
+        // Headless agents are intentionally ephemeral. Container fs.
+        { name: "WORKSPACE_DIR", value: "/home/agent/workspace" },
+      )
+    }
+
     const apps = k8sApps()
     try {
       await apps.createNamespacedStatefulSet({
@@ -193,7 +276,7 @@ export class AgentsService {
           metadata: {
             name: slug,
             namespace: ns,
-            labels: this.agentLabels(ownerId, input.agentType),
+            labels: this.agentLabels(ownerId, input.agentType, input.boundToVm),
             annotations: { [AGENT_DISPLAY_NAME_ANNOTATION]: displayName },
           },
           spec: {
@@ -205,41 +288,26 @@ export class AgentsService {
             template: {
               metadata: {
                 labels: {
-                  ...this.agentLabels(ownerId, input.agentType),
+                  ...this.agentLabels(ownerId, input.agentType, input.boundToVm),
                   "agent-platform/agent-slug": slug,
                 },
               },
-              spec: {
+              spec: ({
                 containers: [
                   {
                     name: "agent",
                     image,
                     // AGENT_TYPE picks the wrapper's adapter;
-                    // AGENT_PORT is the FastAPI listen port. Service
-                    // + HTTPRoute have to match (see ensureService).
-                    ports: [
-                      { name: "http", containerPort: AGENT_PORT },
-                    ],
-                    env: [
-                      { name: "AGENT_OWNER", value: ownerId },
-                      { name: "AGENT_SLUG", value: slug },
-                      { name: "AGENT_NAME", value: displayName },
-                      { name: "AGENT_TYPE", value: input.agentType },
-                      { name: "AGENT_PORT", value: String(AGENT_PORT) },
-                      { name: "AGENT_HOST", value: "0.0.0.0" },
-                      // Headless = no workspace container, no SSH
-                      // shim. The wrapper just runs the agent CLI
-                      // directly inside this container.
-                      { name: "AGENT_USE_SSH_SHIM", value: "false" },
-                      // Wrapper's WORKSPACE_DIR — events.jsonl /
-                      // sessions live under this. Headless agents
-                      // are intentionally ephemeral: pod restart
-                      // wipes session state. Container fs is fine.
-                      { name: "WORKSPACE_DIR", value: "/home/agent/workspace" },
-                    ],
+                    // AGENT_PORT is the FastAPI listen port.
+                    ports: [{ name: "http", containerPort: AGENT_PORT }],
+                    env,
+                    volumeMounts,
                   },
                 ],
-              },
+                ...(volumes.length ? { volumes } : {}),
+                ...(affinity ? { affinity } : {}),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as unknown as any),
             },
           },
         },
@@ -283,18 +351,35 @@ export class AgentsService {
   async delete(ownerId: string, slug: string): Promise<void> {
     const cleanSlug = sanitizeLabel(slug)
     if (!cleanSlug) throw new BadRequestException("Invalid agent slug.")
-    // VM-attached agents share their slug with the parent VM and have
-    // no independent lifecycle — they live and die with the VM. Block
-    // direct delete here so users go through /vms/:slug instead.
-    if (cleanSlug.startsWith("vm-")) {
-      throw new ConflictException(
-        `Agent "${cleanSlug}" is attached to a VM. Delete the VM instead.`,
-      )
-    }
     const allowed = await this.fga.canAccessAgent(ownerId, cleanSlug)
     if (!allowed) {
       throw new NotFoundException(`Agent "${cleanSlug}" not found.`)
     }
+    // Block direct delete on attached agents — they're cleaned up
+    // by VM delete (cascade). Caller should /vms/:slug instead.
+    const sts = await k8sApps()
+      .readNamespacedStatefulSet({ name: cleanSlug, namespace: RESOURCE_NS })
+      .catch(() => null)
+    const boundToVm = sts?.metadata?.labels?.[AGENT_BOUND_TO_VM_LABEL]
+    if (boundToVm) {
+      throw new ConflictException(
+        `Agent "${cleanSlug}" is attached to VM "${boundToVm}". Delete the VM instead.`,
+      )
+    }
+    await this.tearDownResources(cleanSlug)
+  }
+
+  // Cascade entry point used by VmsService.delete. Skips the
+  // bound-to-VM guard (the VM IS being deleted) but still revokes
+  // FGA tuples + tears down k8s. Callers are responsible for FGA
+  // ownership checks at their own boundary.
+  async deleteAttachedForCascade(slug: string): Promise<void> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug) return
+    await this.tearDownResources(cleanSlug)
+  }
+
+  private async tearDownResources(cleanSlug: string): Promise<void> {
     const ns = RESOURCE_NS
     const apps = k8sApps()
     const core = k8sCore()
@@ -491,12 +576,17 @@ export class AgentsService {
   private agentLabels(
     ownerId: string,
     agentType: AgentType,
+    boundToVm?: string,
   ): Record<string, string> {
-    return {
+    const labels: Record<string, string> = {
       [AGENT_LABEL]: AGENT_LABEL_VALUE,
       [AGENT_OWNER_LABEL]: sanitizeLabel(ownerId),
       [AGENT_TYPE_LABEL]: agentType,
     }
+    if (boundToVm) {
+      labels[AGENT_BOUND_TO_VM_LABEL] = sanitizeLabel(boundToVm)
+    }
+    return labels
   }
 
   private launchUrl(target: string): string {
@@ -529,36 +619,10 @@ export class AgentsService {
     const createdAt =
       ts instanceof Date ? ts.toISOString() : (ts ?? new Date().toISOString())
 
-    // Discriminate by component label:
-    //   AGENT_LABEL_VALUE → standalone agent STS
-    //   VM_LABEL_VALUE    → a VM with agentType != "none" (sidecar)
-    const isVmAttached = labels[VM_LABEL] === VM_LABEL_VALUE
-    if (isVmAttached) {
-      const displayName = annotations[VM_DISPLAY_NAME_ANNOTATION] ?? slug
-      const owner = labels[VM_OWNER_LABEL] ?? "unknown"
-      const agentType = (labels[VM_AGENT_TYPE_LABEL] as AgentType) ?? "hermes"
-      // No public hostname for VM-attached agents — they're reached
-      // via the chat proxy (/agents/<slug>/chat/...). Leave hostname
-      // pointing at the VM's vm-domain hostname for cosmetic display.
-      const hostname = `${slug}.${this.agentsDomain}`
-      return {
-        id: sts.metadata?.uid ?? `${namespace}/${slug}`,
-        slug,
-        name: displayName,
-        owner,
-        namespace,
-        agentType,
-        status,
-        hostname,
-        createdAt,
-        gatewayUrl: "",
-        boundToVm: slug,
-      }
-    }
-
     const displayName = annotations[AGENT_DISPLAY_NAME_ANNOTATION] ?? slug
     const owner = labels[AGENT_OWNER_LABEL] ?? "unknown"
     const agentType = (labels[AGENT_TYPE_LABEL] as AgentType) ?? "hermes"
+    const boundToVm = labels[AGENT_BOUND_TO_VM_LABEL] || null
     const hostname = `${slug}.${this.agentsDomain}`
     return {
       id: sts.metadata?.uid ?? `${namespace}/${slug}`,
@@ -570,8 +634,10 @@ export class AgentsService {
       status,
       hostname,
       createdAt,
-      gatewayUrl: this.launchUrl(`https://${hostname}`),
-      boundToVm: null,
+      // Bound agents are reached via /agents/<slug>/chat/... only —
+      // no public hostname plumbed for them yet.
+      gatewayUrl: boundToVm ? "" : this.launchUrl(`https://${hostname}`),
+      boundToVm,
     }
   }
 }

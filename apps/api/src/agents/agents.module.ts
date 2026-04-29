@@ -7,5 +7,8 @@ import { AgentsService } from "./agents.service"
   imports: [OpenFgaModule],
   controllers: [AgentsController, AgentsAuthController],
   providers: [AgentsService],
+  // Exported so VmsService can call AgentsService.create with
+  // boundToVm (VM-attached agent flow).
+  exports: [AgentsService],
 })
 export class AgentsModule {}

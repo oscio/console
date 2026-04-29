@@ -7,6 +7,8 @@ import {
 } from "@nestjs/common"
 import { randomBytes } from "node:crypto"
 import { authPool } from "@workspace/auth"
+import { AgentsService } from "../agents/agents.service"
+import { generateAgentKeypair } from "../agents/sshkey"
 import { LoadBalancersService } from "../loadbalancers/loadbalancers.service"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { VolumesService } from "../volumes/volumes.service"
@@ -80,14 +82,11 @@ export class VmsService {
     private readonly fga: OpenFgaService,
     private readonly volumes: VolumesService,
     private readonly loadBalancers: LoadBalancersService,
+    private readonly agents: AgentsService,
   ) {}
 
   private readonly imageBase = process.env.VM_IMAGE_BASE ?? ""
   private readonly imageDesktop = process.env.VM_IMAGE_DESKTOP ?? ""
-  // Agent sidecar image. Same image regardless of agentType — the
-  // entrypoint reads AGENT_TYPE and dispatches to the right adapter.
-  // Shared with AgentsService.
-  private readonly agentImage = process.env.AGENT_IMAGE ?? ""
   private readonly vmDomain = process.env.VM_DOMAIN ?? "vm.localhost"
   // oauth2-proxy public URL. Launch links route through
   // /oauth2/start?rd=<vm-url> so users get silent SSO via Keycloak
@@ -175,17 +174,9 @@ export class VmsService {
         `Failed to grant VM owner tuple for ${slug}: ${(err as Error).message}`,
       )
     })
-    // Same dance for the agent — when a sidecar is attached, mirror
-    // the LB pattern: it shows up under /agents (boundToVm = this
-    // VM's slug). The slug we register is the VM slug, so the agent
-    // chat proxy can reach the sidecar at <vm-slug>.<ns>.svc:8000.
-    if (input.agentType !== "none") {
-      await this.fga.grantAgentOwner(slug, ownerId).catch((err) => {
-        throw new Error(
-          `Failed to grant Agent owner tuple for ${slug}: ${(err as Error).message}`,
-        )
-      })
-    }
+    // Note: when an agent is attached, AgentsService.create (called
+    // at the end of this method) writes its own `agent:<agent-slug>`
+    // FGA tuple. The VM owner tuple here is independent.
 
     // Idempotent: ensures the unified namespace exists on first
     // create after a fresh deploy. Cheap on subsequent calls.
@@ -241,21 +232,50 @@ export class VmsService {
       )
     }
 
-    // Create the headless Service first so the StatefulSet's stable DNS
-    // (`<slug>-0.<svc>.<ns>.svc.cluster.local`) resolves the moment the
-    // pod comes up.
-    // Build the pod spec piece-by-piece. Agent attachment adds an
-    // emptyDir volume + init container (generates ed25519 keypair) +
-    // a sidecar container running the agent wrapper. The workspace
-    // mounts the public key from the same emptyDir; sshd in the
-    // workspace already picks up authorized_keys via start.sh.
+    // Agent attachment now lives in a SEPARATE pod (via
+    // AgentsService.create with boundToVm). VM pod is back to just
+    // workspace + dind. The only piece the VM still owns is the
+    // SSH key Secret used by the agent — workspace's sshd needs
+    // the matching authorized_keys mounted in.
     const wantAgent = input.agentType !== "none"
 
-    await this.ensureService(ns, slug, input.imageType, wantAgent)
-    if (wantAgent && !this.agentImage) {
-      throw new BadRequestException(
-        "Agent sidecar requested but AGENT_IMAGE env var is not set on console-api.",
+    await this.ensureService(ns, slug, input.imageType)
+
+    let sshKeySecretName: string | null = null
+    if (wantAgent) {
+      if (!input.agentType) {
+        throw new BadRequestException("agentType is required for sidecar agent.")
+      }
+      // Pre-create the SSH key Secret BEFORE the workspace pod —
+      // pod template references it by name, so it has to exist.
+      // The agent pod (created later via AgentsService) reads the
+      // private key from the same Secret.
+      sshKeySecretName = `agent-ssh-${slug}`
+      const { privateKeyPem, publicKeyOpenssh } = generateAgentKeypair(
+        `agent-${slug}`,
       )
+      const core = k8sCore()
+      await core.createNamespacedSecret({
+        namespace: ns,
+        body: {
+          apiVersion: "v1",
+          kind: "Secret",
+          metadata: {
+            name: sshKeySecretName,
+            namespace: ns,
+            labels: {
+              [VM_LABEL]: VM_LABEL_VALUE,
+              [VM_OWNER_LABEL]: sanitizeLabel(ownerId),
+              "agent-platform/agent-bound-to-vm": slug,
+            },
+          },
+          type: "Opaque",
+          stringData: {
+            id_ed25519: privateKeyPem,
+            authorized_keys: publicKeyOpenssh + "\n",
+          },
+        },
+      }).catch((err) => rethrowK8sError(err, `Failed to create SSH Secret for ${slug}`))
     }
 
     const workspaceMounts: Array<{
@@ -270,7 +290,7 @@ export class VmsService {
         mountPath: VM_DATA_MOUNT_PATH,
       })
     }
-    if (wantAgent) {
+    if (sshKeySecretName) {
       workspaceMounts.push({
         name: "agent-ssh",
         mountPath: "/etc/agent-ssh",
@@ -321,46 +341,6 @@ export class VmsService {
           : [],
       },
     ]
-    if (wantAgent) {
-      containers.push({
-        name: "agent",
-        image: this.agentImage,
-        ports: [{ name: "agent-http", containerPort: 8000 }],
-        env: [
-          { name: "AGENT_TYPE", value: input.agentType },
-          { name: "AGENT_USE_SSH_SHIM", value: "true" },
-          { name: "SSH_HOST", value: "localhost" },
-          { name: "SSH_PORT", value: "22" },
-          { name: "SSH_USER", value: "coder" },
-          { name: "SSH_KEY", value: "/etc/agent-ssh/id_ed25519" },
-          // Agent state lives under the workspace PVC at the SAME
-          // path the workspace container sees (VM_DATA_MOUNT_PATH).
-          // The wrapper writes $WORKSPACE/.agent/sessions etc.; both
-          // containers (UID 1000 on both sides) read/write the same
-          // files.
-          { name: "WORKSPACE_DIR", value: VM_DATA_MOUNT_PATH },
-          { name: "AGENT_PORT", value: "8000" },
-          { name: "AGENT_HOST", value: "0.0.0.0" },
-        ],
-        volumeMounts: [
-          // The wrapper writes session/task/event state under
-          // $WORKSPACE/.agent/ — needs the PVC.
-          ...(volumeSlug
-            ? [
-                {
-                  name: VM_DATA_VOLUME_NAME,
-                  mountPath: VM_DATA_MOUNT_PATH,
-                },
-              ]
-            : []),
-          {
-            name: "agent-ssh",
-            mountPath: "/etc/agent-ssh",
-            readOnly: true,
-          },
-        ],
-      })
-    }
 
     const podVolumes: Array<Record<string, unknown>> = []
     if (volumeSlug) {
@@ -369,39 +349,15 @@ export class VmsService {
         persistentVolumeClaim: { claimName: volumeSlug },
       })
     }
-    if (wantAgent) {
-      podVolumes.push({ name: "agent-ssh", emptyDir: {} })
+    if (sshKeySecretName) {
+      podVolumes.push({
+        name: "agent-ssh",
+        secret: {
+          secretName: sshKeySecretName,
+          items: [{ key: "authorized_keys", path: "authorized_keys" }],
+        },
+      })
     }
-
-    // Init container generates the ed25519 keypair into the shared
-    // emptyDir before either main container starts. Public key →
-    // workspace's authorized_keys; private key → sidecar's SSH_KEY
-    // mount. Lives only for the pod's lifetime; pod restart = new
-    // keypair (which is fine — every pod is a fresh sandbox).
-    const initContainers = wantAgent
-      ? [
-          {
-            name: "agent-ssh-init",
-            // Reuse the workspace image — guaranteed to have ssh-keygen
-            // since we apt-get'd openssh-server into it.
-            image,
-            command: ["/bin/sh", "-c"],
-            args: [
-              "set -e; " +
-                "if [ ! -f /etc/agent-ssh/id_ed25519 ]; then " +
-                "ssh-keygen -t ed25519 -N '' -C agent-sidecar -f /etc/agent-ssh/id_ed25519; " +
-                "cp /etc/agent-ssh/id_ed25519.pub /etc/agent-ssh/authorized_keys; " +
-                "fi; " +
-                // sidecar's ssh client refuses to use a private key
-                // with relaxed perms — emptyDir defaults to 0644.
-                "chmod 0600 /etc/agent-ssh/id_ed25519",
-            ],
-            volumeMounts: [
-              { name: "agent-ssh", mountPath: "/etc/agent-ssh" },
-            ],
-          },
-        ]
-      : []
 
     const apps = k8sApps()
     try {
@@ -431,13 +387,7 @@ export class VmsService {
                   "agent-platform/vm-slug": slug,
                 },
               },
-              // Casting via `any` — the dynamic shapes come from
-              // optional sidecar / init container / volume arrays
-              // that we build conditionally above. Each element
-              // has the right K8s shape; just not narrowable back
-              // to V1Container[] from Record<string, unknown>[].
               spec: ({
-                ...(initContainers.length ? { initContainers } : {}),
                 containers,
                 volumes: podVolumes,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -487,6 +437,24 @@ export class VmsService {
         port: lb.port,
         persistOnVmDelete: !!lb.persistOnVmDelete,
       })
+    }
+
+    // Attached agent — runs in its own pod with podAffinity to this
+    // VM's node, mounts the workspace PVC at /home/coder/workspace,
+    // bash-shims into the workspace's sshd. Lifecycle is bound to
+    // this VM (cascade-deleted in vms.service.delete).
+    if (wantAgent && volumeSlug && sshKeySecretName) {
+      await this.agents.create(ownerId, {
+        name: `${displayName} agent`,
+        agentType: input.agentType as Exclude<typeof input.agentType, "none">,
+        boundToVm: slug,
+        workspaceVolumeSlug: volumeSlug,
+        sshKeySecretName,
+      })
+    } else if (wantAgent) {
+      throw new BadRequestException(
+        "Agent attachment requires a volume — pick `Create new` or `Attach existing` rather than `No volume`.",
+      )
     }
 
     const vms = await this.listForOwner(ownerId)
@@ -562,6 +530,19 @@ export class VmsService {
         await this.volumes.delete(ownerId, boundVolume).catch(() => undefined)
       }
     }
+    // Cascade-delete every Agent attached to this VM. Each one is
+    // its own StatefulSet+Service+HTTPRoute now — AgentsService
+    // owns the teardown + revoke its FGA tuple.
+    const attached = await this.agents.listForVm(cleanSlug).catch(() => [])
+    for (const a of attached) {
+      await this.agents.deleteAttachedForCascade(a.slug).catch(() => undefined)
+    }
+    // SSH key Secret. Lifecycle is the VM's, not the agent's, since
+    // it's mounted by both VM workspace (authorized_keys) and the
+    // agent pod (private key) — created at VM-create time.
+    await core
+      .deleteNamespacedSecret({ name: `agent-ssh-${cleanSlug}`, namespace: ns })
+      .catch(() => undefined)
     // LB cleanup: cascade-delete every LB targeting this VM that
     // wasn't created with `persistOnVmDelete`. Persisted LBs stay
     // on /loadbalancers (they'll go Pending until re-pointed).
@@ -578,14 +559,6 @@ export class VmsService {
     const owners = await this.fga.listVmOwners(cleanSlug).catch(() => [])
     for (const u of owners) {
       await this.fga.revokeVmOwner(cleanSlug, u).catch(() => undefined)
-    }
-    // Mirror agent owner tuple cleanup. Set when the VM was created
-    // with a sidecar; the agent shared the VM's slug for routing.
-    // Cascade always — VM-attached agents have no "persist" option
-    // (the sidecar dies with the pod regardless).
-    const agentOwners = await this.fga.listAgentOwners(cleanSlug).catch(() => [])
-    for (const u of agentOwners) {
-      await this.fga.revokeAgentOwner(cleanSlug, u).catch(() => undefined)
     }
   }
 
@@ -735,7 +708,6 @@ export class VmsService {
     ns: string,
     name: string,
     imageType: VmImageType,
-    wantAgent: boolean,
   ): Promise<void> {
     const core = k8sCore()
     try {
@@ -752,9 +724,6 @@ export class VmsService {
       { name: "webui", port: 8787, targetPort: 8787 },
       ...(imageType === "desktop"
         ? [{ name: "vnc", port: 6901, targetPort: 6901 }]
-        : []),
-      ...(wantAgent
-        ? [{ name: "agent-http", port: 8000, targetPort: 8000 }]
         : []),
     ]
     try {
