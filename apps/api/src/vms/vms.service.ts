@@ -175,6 +175,17 @@ export class VmsService {
         `Failed to grant VM owner tuple for ${slug}: ${(err as Error).message}`,
       )
     })
+    // Same dance for the agent — when a sidecar is attached, mirror
+    // the LB pattern: it shows up under /agents (boundToVm = this
+    // VM's slug). The slug we register is the VM slug, so the agent
+    // chat proxy can reach the sidecar at <vm-slug>.<ns>.svc:8000.
+    if (input.agentType !== "none") {
+      await this.fga.grantAgentOwner(slug, ownerId).catch((err) => {
+        throw new Error(
+          `Failed to grant Agent owner tuple for ${slug}: ${(err as Error).message}`,
+        )
+      })
+    }
 
     // Idempotent: ensures the unified namespace exists on first
     // create after a fresh deploy. Cheap on subsequent calls.
@@ -567,6 +578,14 @@ export class VmsService {
     const owners = await this.fga.listVmOwners(cleanSlug).catch(() => [])
     for (const u of owners) {
       await this.fga.revokeVmOwner(cleanSlug, u).catch(() => undefined)
+    }
+    // Mirror agent owner tuple cleanup. Set when the VM was created
+    // with a sidecar; the agent shared the VM's slug for routing.
+    // Cascade always — VM-attached agents have no "persist" option
+    // (the sidecar dies with the pod regardless).
+    const agentOwners = await this.fga.listAgentOwners(cleanSlug).catch(() => [])
+    for (const u of agentOwners) {
+      await this.fga.revokeAgentOwner(cleanSlug, u).catch(() => undefined)
     }
   }
 

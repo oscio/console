@@ -178,7 +178,7 @@ export async function deleteVm(
   }
 }
 
-export type AgentType = "hermes" | "openclaw"
+export type AgentType = "hermes" | "zeroclaw"
 export type AgentStatus = VmStatus
 
 export type Agent = {
@@ -192,6 +192,9 @@ export type Agent = {
   hostname: string
   createdAt: string
   gatewayUrl: string
+  // Set when this agent is a VM sidecar (slug = vm-XXX). null for
+  // standalone agents created via /agents directly.
+  boundToVm: string | null
 }
 
 export async function fetchAgents(

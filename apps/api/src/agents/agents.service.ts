@@ -22,6 +22,13 @@ import {
   AgentType,
   CreateAgentInput,
 } from "./agents.types"
+import {
+  VM_AGENT_TYPE_LABEL,
+  VM_DISPLAY_NAME_ANNOTATION,
+  VM_LABEL,
+  VM_LABEL_VALUE,
+  VM_OWNER_LABEL,
+} from "../vms/vms.types"
 
 function sanitizeLabel(value: string): string {
   return value
@@ -98,19 +105,29 @@ export class AgentsService {
     return this.image
   }
 
-  // Admin-only: every agent in the unified resource namespace.
+  // Admin-only: every agent in the unified resource namespace —
+  // standalone agent StatefulSets AND VM StatefulSets that carry a
+  // sidecar (vm-agent-type label != "none").
   async listAll(): Promise<Agent[]> {
     const apps = k8sApps()
-    const res = await apps
-      .listNamespacedStatefulSet({
-        namespace: RESOURCE_NS,
-        labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE}`,
-      })
-      .catch((err: { code?: number; statusCode?: number }) => {
-        if ((err.code ?? err.statusCode) === 404) return { items: [] }
-        throw err
-      })
-    return (res.items ?? []).map((sts) => this.toAgent(sts))
+    const [agentRes, vmRes] = await Promise.all([
+      apps
+        .listNamespacedStatefulSet({
+          namespace: RESOURCE_NS,
+          labelSelector: `${AGENT_LABEL}=${AGENT_LABEL_VALUE}`,
+        })
+        .catch(() => ({ items: [] })),
+      apps
+        .listNamespacedStatefulSet({
+          namespace: RESOURCE_NS,
+          labelSelector: `${VM_LABEL}=${VM_LABEL_VALUE},${VM_AGENT_TYPE_LABEL} notin (none)`,
+        })
+        .catch(() => ({ items: [] })),
+    ])
+    return [
+      ...(agentRes.items ?? []),
+      ...(vmRes.items ?? []),
+    ].map((sts) => this.toAgent(sts))
   }
 
   async listForOwner(ownerId: string): Promise<Agent[]> {
@@ -278,6 +295,14 @@ export class AgentsService {
   async delete(ownerId: string, slug: string): Promise<void> {
     const cleanSlug = sanitizeLabel(slug)
     if (!cleanSlug) throw new BadRequestException("Invalid agent slug.")
+    // VM-attached agents share their slug with the parent VM and have
+    // no independent lifecycle — they live and die with the VM. Block
+    // direct delete here so users go through /vms/:slug instead.
+    if (cleanSlug.startsWith("vm-")) {
+      throw new ConflictException(
+        `Agent "${cleanSlug}" is attached to a VM. Delete the VM instead.`,
+      )
+    }
     const allowed = await this.fga.canAccessAgent(ownerId, cleanSlug)
     if (!allowed) {
       throw new NotFoundException(`Agent "${cleanSlug}" not found.`)
@@ -512,9 +537,6 @@ export class AgentsService {
     const namespace = sts.metadata?.namespace ?? "unknown"
     const labels = sts.metadata?.labels ?? {}
     const annotations = sts.metadata?.annotations ?? {}
-    const displayName = annotations[AGENT_DISPLAY_NAME_ANNOTATION] ?? slug
-    const owner = labels[AGENT_OWNER_LABEL] ?? "unknown"
-    const agentType = (labels[AGENT_TYPE_LABEL] as AgentType) ?? "hermes"
     const ready = sts.status?.readyReplicas ?? 0
     const replicas = sts.status?.replicas ?? 0
     let status: AgentStatus = "Pending"
@@ -524,6 +546,37 @@ export class AgentsService {
     const ts = sts.metadata?.creationTimestamp
     const createdAt =
       ts instanceof Date ? ts.toISOString() : (ts ?? new Date().toISOString())
+
+    // Discriminate by component label:
+    //   AGENT_LABEL_VALUE → standalone agent STS
+    //   VM_LABEL_VALUE    → a VM with agentType != "none" (sidecar)
+    const isVmAttached = labels[VM_LABEL] === VM_LABEL_VALUE
+    if (isVmAttached) {
+      const displayName = annotations[VM_DISPLAY_NAME_ANNOTATION] ?? slug
+      const owner = labels[VM_OWNER_LABEL] ?? "unknown"
+      const agentType = (labels[VM_AGENT_TYPE_LABEL] as AgentType) ?? "hermes"
+      // No public hostname for VM-attached agents — they're reached
+      // via the chat proxy (/agents/<slug>/chat/...). Leave hostname
+      // pointing at the VM's vm-domain hostname for cosmetic display.
+      const hostname = `${slug}.${this.agentsDomain}`
+      return {
+        id: sts.metadata?.uid ?? `${namespace}/${slug}`,
+        slug,
+        name: displayName,
+        owner,
+        namespace,
+        agentType,
+        status,
+        hostname,
+        createdAt,
+        gatewayUrl: "",
+        boundToVm: slug,
+      }
+    }
+
+    const displayName = annotations[AGENT_DISPLAY_NAME_ANNOTATION] ?? slug
+    const owner = labels[AGENT_OWNER_LABEL] ?? "unknown"
+    const agentType = (labels[AGENT_TYPE_LABEL] as AgentType) ?? "hermes"
     const hostname = `${slug}.${this.agentsDomain}`
     return {
       id: sts.metadata?.uid ?? `${namespace}/${slug}`,
@@ -536,6 +589,7 @@ export class AgentsService {
       hostname,
       createdAt,
       gatewayUrl: this.launchUrl(`https://${hostname}`),
+      boundToVm: null,
     }
   }
 }

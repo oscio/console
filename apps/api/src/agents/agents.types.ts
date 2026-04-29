@@ -9,7 +9,9 @@ export type Agent = {
   // K8s resource UID — opaque, stable for the lifetime of the resource.
   id: string
   // Random slug used as the K8s resource name + DNS hostname. Stable
-  // and DNS-safe regardless of what the user typed for `name`.
+  // and DNS-safe regardless of what the user typed for `name`. For
+  // standalone agents this is `agent-XXXXXXXX`; for VM-attached
+  // sidecars it's the VM's slug `vm-XXXXXXXX`.
   slug: string
   // Free-form display label the user typed at create time.
   name: string
@@ -23,6 +25,10 @@ export type Agent = {
   // Path-routed through oauth2-proxy /oauth2/start the same way
   // VM URLs are.
   gatewayUrl: string
+  // VM slug this agent rides as a sidecar in, or null for standalone
+  // agents. UI uses this to render an "attached to <vm-name>" badge
+  // on the /agents listing.
+  boundToVm: string | null
 }
 
 export type CreateAgentInput = {

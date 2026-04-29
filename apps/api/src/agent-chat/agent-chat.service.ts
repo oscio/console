@@ -10,24 +10,19 @@ function wrapperUrl(slug: string, path: string): string {
   return `http://${slug}.${RESOURCE_NS}.svc.cluster.local:8000${path}`
 }
 
-export type Resource = "vm" | "agent"
-
 @Injectable()
 export class AgentChatService {
   constructor(private readonly fga: OpenFgaService) {}
 
-  // FGA gate. 404 (not 403) on miss so we don't leak slug existence
-  // to non-owners — same convention as VmsService / AgentsService.
-  async assertOwner(
-    ownerId: string,
-    resource: Resource,
-    slug: string,
-  ): Promise<void> {
-    const allowed = resource === "vm"
-      ? await this.fga.canAccessVm(ownerId, slug)
-      : await this.fga.canAccessAgent(ownerId, slug)
+  // FGA gate against the agent tuple. The tuple is written by both
+  // AgentsService.create (standalone) and VmsService.create (when a
+  // sidecar is attached), so one check covers both. 404 on miss so
+  // we don't leak slug existence — same convention as the rest of
+  // the API.
+  async assertOwner(ownerId: string, slug: string): Promise<void> {
+    const allowed = await this.fga.canAccessAgent(ownerId, slug)
     if (!allowed) {
-      throw new NotFoundException(`${resource} "${slug}" not found.`)
+      throw new NotFoundException(`agent "${slug}" not found.`)
     }
   }
 
