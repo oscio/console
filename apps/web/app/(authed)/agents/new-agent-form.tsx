@@ -154,10 +154,12 @@ export function DeleteAgentButton({
   action,
   slug,
   label,
+  disabled,
 }: {
   action: (formData: FormData) => Promise<void>
   slug: string
   label: string
+  disabled?: boolean
 }) {
   const [pending, startTransition] = useTransition()
   return (
@@ -175,8 +177,9 @@ export function DeleteAgentButton({
         type="submit"
         variant="outline"
         size="sm"
-        disabled={pending}
+        disabled={pending || disabled}
         className="text-destructive hover:text-destructive"
+        title={disabled ? "Agent is attached to a VM. Delete the VM first." : undefined}
       >
         {pending ? "Deleting…" : "Delete"}
       </Button>

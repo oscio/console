@@ -120,13 +120,12 @@ export default async function AgentsPage() {
                       <Button asChild size="sm" variant="outline">
                         <Link href={`/agents/${agent.slug}`}>Open</Link>
                       </Button>
-                      {!agent.boundToVm && (
-                        <DeleteAgentButton
-                          action={deleteAgentAction}
-                          slug={agent.slug}
-                          label={agent.name}
-                        />
-                      )}
+                      <DeleteAgentButton
+                        action={deleteAgentAction}
+                        slug={agent.slug}
+                        label={agent.name}
+                        disabled={!!agent.boundToVm}
+                      />
                     </div>
                   </TableCell>
                 </TableRow>
