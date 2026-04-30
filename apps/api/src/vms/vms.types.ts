@@ -22,6 +22,12 @@ export type Vm = {
   agentType: VmAgentType
   status: VmStatus
   hostname: string
+  // Allocated resource requests from the workspace container's pod
+  // spec. Populated by toVm(); shown in the detail card so users
+  // see what the VM was sized to. Strings keep K8s' native shape
+  // ("2", "4Gi") instead of arbitrary normalisation.
+  cpu: string
+  memory: string
   createdAt: string
   // Launch URLs — all path-based on the console hostname so they share
   // its (browser-trusted) cert. The HTTPRoute's URLRewrite strips the

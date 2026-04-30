@@ -81,18 +81,18 @@ export default async function VmDetailPage({
         )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <LaunchCard
-            href={vm.codeUrl}
-            disabled={!isRunning}
-            icon={<Cube weight="duotone" className="size-5" />}
-            title="code-server"
-            blurb="VS Code in the browser, on this VM."
-          />
-          <LaunchCard
             href={vm.xtermUrl}
             disabled={!isRunning}
             icon={<Terminal weight="duotone" className="size-5" />}
             title="xterm"
             blurb="Web terminal (ttyd) into a bash shell."
+          />
+          <LaunchCard
+            href={vm.codeUrl}
+            disabled={!isRunning}
+            icon={<Cube weight="duotone" className="size-5" />}
+            title="code-server"
+            blurb="VS Code in the browser, on this VM."
           />
           {vm.vncUrl && (
             <LaunchCard
@@ -131,6 +131,10 @@ function Details({ vm }: { vm: Vm }) {
       <dd>
         <StatusBadge status={vm.status} />
       </dd>
+      <dt className="text-muted-foreground">CPU</dt>
+      <dd className="font-mono">{vm.cpu}</dd>
+      <dt className="text-muted-foreground">Memory</dt>
+      <dd className="font-mono">{vm.memory}</dd>
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{vm.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>

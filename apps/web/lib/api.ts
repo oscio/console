@@ -100,6 +100,10 @@ export type Vm = {
   agentType: VmAgentType
   status: VmStatus
   hostname: string
+  // Resource requests on the workspace container, K8s-native form
+  // (e.g. "2", "4Gi"). Surfaced for the VM detail card.
+  cpu: string
+  memory: string
   createdAt: string
   xtermUrl: string
   codeUrl: string

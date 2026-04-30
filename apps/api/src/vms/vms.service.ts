@@ -926,6 +926,19 @@ export class VmsService {
       uid?: string
       creationTimestamp?: string | Date
     }
+    spec?: {
+      template?: {
+        spec?: {
+          containers?: Array<{
+            name?: string
+            resources?: {
+              requests?: Record<string, string>
+              limits?: Record<string, string>
+            }
+          }>
+        }
+      }
+    }
     status?: { readyReplicas?: number; replicas?: number }
   }): Vm {
     // The K8s resource name IS the slug — we set it that way at create.
@@ -947,6 +960,16 @@ export class VmsService {
     const createdAt =
       ts instanceof Date ? ts.toISOString() : (ts ?? new Date().toISOString())
     const hostname = `${slug}.${this.vmDomain}`
+    // Read the workspace container's resource requests for the
+    // detail page. Falls back to the api defaults when the pod spec
+    // is missing them (older STS, non-canonical setup) so the field
+    // is never empty in the UI.
+    const vmContainer =
+      sts.spec?.template?.spec?.containers?.find((c) => c.name === "vm") ??
+      sts.spec?.template?.spec?.containers?.[0]
+    const requests = vmContainer?.resources?.requests ?? {}
+    const cpu = requests.cpu ?? VM_DEFAULTS.cpu
+    const memory = requests.memory ?? VM_DEFAULTS.memory
     return {
       id: sts.metadata?.uid ?? `${namespace}/${slug}`,
       slug,
@@ -958,6 +981,8 @@ export class VmsService {
       status,
       hostname,
       createdAt,
+      cpu,
+      memory,
       // Per-host URLs under the `*.vm.<domain>` wildcard listener.
       // Routed through oauth2-proxy /oauth2/start so the browser does
       // a silent OIDC roundtrip first (user already has a Keycloak

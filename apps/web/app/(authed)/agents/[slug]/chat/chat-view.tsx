@@ -3,23 +3,6 @@
 import { useEffect, useRef, useState, useTransition } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { CopyableId } from "@/components/copyable-id"
-import { renderMarkdownAsCli } from "@/lib/cli-markdown"
-
-// Render assistant markdown as CLI-style text (Unicode box tables,
-// `# heading` prefixes, `•` bullets, indented code). Pure browser-
-// safe: just `marked.lexer` + a small token walker, no Node deps.
-// Crashes fall back to the original markdown so the chat never
-// goes blank.
-function safeRenderAssistant(md: string): string {
-  try {
-    return renderMarkdownAsCli(md)
-  } catch (e) {
-    if (typeof console !== "undefined") {
-      console.error("cli-markdown render failed", e)
-    }
-    return md
-  }
-}
 
 // Strip ANSI escape sequences (CSI + a few common alts). Tool output
 // from shell commands routinely includes color/cursor codes that
@@ -121,7 +104,12 @@ export function ChatView({
           )
           if (!r.ok) continue
           const task = (await r.json()) as Task
-          for (const ev of task.events ?? []) all.push(ev)
+          // Older events (written before runner.py started stamping
+          // task_id into task.done/started payloads) lack the field.
+          // Backfill from the parent task's id so the CopyableId chip
+          // never renders empty.
+          for (const ev of task.events ?? [])
+            all.push({ task_id: m.task_id, ...ev })
         }
         if (!cancelled) {
           setHistoryEvents(all)
@@ -175,9 +163,13 @@ export function ChatView({
         }
         const task = (await res.json()) as Task
         if (cancelled) return
-        setLiveEvents(task.events ?? [])
+        const enriched = (task.events ?? []).map((ev) => ({
+          task_id: taskId,
+          ...ev,
+        }))
+        setLiveEvents(enriched)
         if (TERMINAL.has(task.status)) {
-          setHistoryEvents((prev) => [...prev, ...(task.events ?? [])])
+          setHistoryEvents((prev) => [...prev, ...enriched])
           setLiveEvents([])
           setTaskId(null)
           return
@@ -313,7 +305,7 @@ function EventRow({ ev }: { ev: Event }) {
             {role}
           </span>
           <pre className="font-mono text-sm whitespace-pre-wrap break-words">
-            {role === "assistant" ? safeRenderAssistant(content) : content}
+            {content}
           </pre>
         </div>
       )
