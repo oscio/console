@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react"
 import { Button } from "@workspace/ui/components/button"
+import { CopyableId } from "@/components/copyable-id"
 
 // Minimal chat surface. Each prompt → POST /tasks → poll GET /tasks/<id>
 // until terminal state. Events are appended to the on-screen log as
@@ -239,10 +240,7 @@ function EventRow({ ev }: { ev: Event }) {
     case "task.started":
       return (
         <p className="text-muted-foreground/60 text-xs">
-          task{" "}
-          <code className="font-mono select-all">
-            {String(ev.task_id ?? "")}
-          </code>
+          task <CopyableId id={String(ev.task_id ?? "")} />
         </p>
       )
     case "message": {
@@ -282,11 +280,9 @@ function EventRow({ ev }: { ev: Event }) {
         </p>
       )
     case "task.done":
-      return (
-        <p className="text-muted-foreground text-xs italic">
-          — done
-        </p>
-      )
+      // Silenced — message stream halt is itself the end-of-turn
+      // signal. The event still lands in events.jsonl for debugging.
+      return null
     case "task.error":
       return (
         <p className="text-destructive text-xs">

@@ -7,6 +7,7 @@ import {
   listAgentSessions,
 } from "@/lib/api"
 import { ChatView } from "./chat-view"
+import { CopyableId } from "@/components/copyable-id"
 
 export default async function AgentChatPage({
   params,
@@ -53,7 +54,7 @@ export default async function AgentChatPage({
         <h1 className="mt-2 text-2xl font-semibold">Chat</h1>
         <p className="text-muted-foreground text-xs">
           {agent.agentType} · session{" "}
-          <code className="font-mono select-all opacity-70">{sessionId}</code>
+          <CopyableId id={sessionId} className="opacity-70" />
         </p>
       </div>
 
