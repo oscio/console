@@ -54,12 +54,20 @@ function rethrowK8sError(err: unknown, fallback: string): never {
 // PVC phase → simplified status. Treats "Available" as "no claim ever
 // bound" — for the UI's "attach a free volume" affordance, that's
 // what the user wants to see in the dropdown.
+//
+// `phase=Pending + boundTo=null` is also reported as "Available": the
+// k3s default StorageClass uses WaitForFirstConsumer, so a fresh
+// standalone PVC sits Pending forever until something mounts it.
+// From the user's view it IS available for attach, so we map it
+// that way instead of leaving it in a misleading Pending state.
+// Genuine provisioning failures still surface as Failed (Lost/Failed
+// phase) because those phases never set Pending.
 function statusFromPhase(
   phase: string | undefined,
   boundTo: string | null,
 ): VolumeStatus {
   if (phase === "Bound") return boundTo ? "Bound" : "Available"
-  if (phase === "Pending") return "Pending"
+  if (phase === "Pending") return boundTo ? "Pending" : "Available"
   if (phase === "Lost" || phase === "Failed") return "Failed"
   return "Unknown"
 }
