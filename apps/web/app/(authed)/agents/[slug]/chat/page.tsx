@@ -53,7 +53,7 @@ export default async function AgentChatPage({
         <h1 className="mt-2 text-2xl font-semibold">Chat</h1>
         <p className="text-muted-foreground text-xs">
           {agent.agentType} · session{" "}
-          <code className="font-mono">{sessionId.slice(0, 8)}…</code>
+          <code className="font-mono select-all opacity-70">{sessionId}</code>
         </p>
       </div>
 
