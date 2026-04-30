@@ -330,19 +330,22 @@ export class VmsService {
         args: ["--mtu=1450"],
         env: [{ name: "DOCKER_TLS_CERTDIR", value: "" }],
         securityContext: { privileged: true, runAsUser: 0 },
-        volumeMounts: volumeSlug
-          ? [
-              {
-                name: VM_DATA_VOLUME_NAME,
-                mountPath: "/var/lib/docker",
-                subPath: "docker",
-              },
-            ]
-          : [],
+        // /var/lib/docker on emptyDir — image cache + running
+        // containers don't survive pod restart, but the workspace
+        // PVC stays clean (no root-owned `docker/` subdir
+        // surfacing in /home/coder/workspace, no permission errors
+        // for the coder user).
+        volumeMounts: [
+          { name: "dind-state", mountPath: "/var/lib/docker" },
+        ],
       },
     ]
 
-    const podVolumes: Array<Record<string, unknown>> = []
+    const podVolumes: Array<Record<string, unknown>> = [
+      // Per-pod docker daemon state. Always emptyDir; see the dind
+      // container's volumeMount comment for the rationale.
+      { name: "dind-state", emptyDir: {} },
+    ]
     if (volumeSlug) {
       podVolumes.push({
         name: VM_DATA_VOLUME_NAME,
