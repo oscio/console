@@ -23,7 +23,7 @@ export default function SignInPage() {
 
   return (
     <div className="bg-background flex min-h-svh items-center justify-center p-4">
-      <div className="bg-card text-card-foreground grid w-full max-w-2xl overflow-hidden rounded-md border sm:grid-cols-[1fr_1.5fr]">
+      <div className="bg-card text-card-foreground grid w-full max-w-2xl overflow-hidden border sm:grid-cols-[1fr_1.5fr]">
         {/* Branding panel — dark in both themes. Single piece of
             copy: the "Console" wordmark, top-left. */}
         <div
@@ -47,14 +47,14 @@ export default function SignInPage() {
             {error ? (
               <div
                 role="alert"
-                className="border-destructive/30 bg-destructive/5 text-destructive mt-5 rounded border px-3 py-2 text-sm"
+                className="border-destructive/30 bg-destructive/5 text-destructive mt-5 border px-3 py-2 text-sm"
               >
                 {error}
               </div>
             ) : null}
 
             <Button
-              className="mt-5 w-full"
+              className="mt-5 w-full rounded-none"
               disabled={loading}
               onClick={onSignIn}
             >
