@@ -22,30 +22,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
-import { AGENT_ENV } from "@/lib/agent-env"
+import { type AgentModel, DEFAULT_AGENT_MODEL } from "@/lib/agent-models"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
-export function NewAgentForm({ action }: { action: Action }) {
+export function NewAgentForm({
+  action,
+  models,
+}: {
+  action: Action
+  models: AgentModel[]
+}) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   // shadcn Select renders a Radix Listbox, not a native <select>, so
   // mirror its value into a hidden input for FormData.
-  const [agentType, setAgentType] = useState<"hermes" | "zeroclaw">("hermes")
-  // Local map of user-entered env values, keyed by env-var name.
-  // Reset every time agentType flips so the modal doesn't carry
-  // stale values across types.
-  const [envValues, setEnvValues] = useState<Record<string, string>>({})
-  const fields = AGENT_ENV[agentType] ?? []
-  const envPayload = JSON.stringify(
-    Object.fromEntries(
-      fields
-        .map((f) => [f.name, envValues[f.name] ?? ""] as const)
-        .filter(([, v]) => v.length > 0),
-    ),
-  )
+  const [agentType, setAgentType] = useState<"hermes" | "zeroclaw">("zeroclaw")
+  // Default to the canonical id if openrouter returned it, otherwise
+  // first item in whatever list we got back.
+  const initialModel =
+    models.find((m) => m.id === DEFAULT_AGENT_MODEL)?.id ??
+    models[0]?.id ??
+    DEFAULT_AGENT_MODEL
+  const [model, setModel] = useState<string>(initialModel)
 
   return (
     <Dialog
@@ -63,8 +64,8 @@ export function NewAgentForm({ action }: { action: Action }) {
           <DialogTitle>New Agent</DialogTitle>
           <DialogDescription>
             Provisions a StatefulSet (1 replica) in the shared{" "}
-            <code>resource</code> namespace. State is ephemeral —
-            sessions are wiped on pod restart.
+            <code>resource</code> namespace. Provider credentials come
+            from the platform-wide settings — pick the model here.
           </DialogDescription>
         </DialogHeader>
 
@@ -106,54 +107,40 @@ export function NewAgentForm({ action }: { action: Action }) {
             <input type="hidden" name="agentType" value={agentType} />
             <Select
               value={agentType}
-              onValueChange={(v) => {
+              onValueChange={(v) =>
                 setAgentType(v as "hermes" | "zeroclaw")
-                setEnvValues({})
-              }}
+              }
             >
               <SelectTrigger id="agent-type" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="hermes">hermes</SelectItem>
                 <SelectItem value="zeroclaw">zeroclaw</SelectItem>
+                <SelectItem value="hermes">hermes</SelectItem>
               </SelectContent>
             </Select>
           </Field>
 
-          <input type="hidden" name="env" value={envPayload} />
-          {fields.length > 0 && (
-            <div className="space-y-3 border p-3">
-              <p className="text-xs font-medium">Environment</p>
-              {fields.map((f) => (
-                <div key={f.name} className="space-y-1.5">
-                  <Label
-                    htmlFor={`agent-env-${f.name}`}
-                    className="text-xs"
-                  >
-                    {f.label}
-                  </Label>
-                  <Input
-                    id={`agent-env-${f.name}`}
-                    type={f.secret ? "password" : "text"}
-                    autoComplete="off"
-                    value={envValues[f.name] ?? ""}
-                    onChange={(e) =>
-                      setEnvValues((prev) => ({
-                        ...prev,
-                        [f.name]: e.target.value,
-                      }))
-                    }
-                    placeholder={f.name}
-                  />
-                  {f.hint && (
-                    <p className="text-muted-foreground text-xs">
-                      {f.hint}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
+          {agentType === "zeroclaw" && (
+            <Field
+              id="agent-model"
+              label="Model"
+              hint="Routed via OpenRouter. The platform OPENROUTER_API_KEY (set by an admin in /settings) is shared by every agent."
+            >
+              <input type="hidden" name="model" value={model} />
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger id="agent-model" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           )}
 
           {error && (

@@ -44,14 +44,28 @@ const RESOURCES: NavItem[] = [
   { href: "/agents", label: "Agents", icon: Robot },
 ]
 
-const FOOTER: NavItem[] = [{ href: "/settings", label: "Settings", icon: GearSix }]
+const SETTINGS_ITEM: NavItem = {
+  href: "/settings",
+  label: "Settings",
+  icon: GearSix,
+}
 
 export function ConsoleSidebar({
   user,
 }: {
-  user: { name: string | null; email: string }
+  user: {
+    name: string | null
+    email: string
+    // Either flag is enough to surface /settings — both roles can
+    // read + write global env. Layout passes these through from
+    // fetchMe() so a regular user never sees the entry.
+    isPlatformAdmin?: boolean
+    isConsoleAdmin?: boolean
+  }
 }) {
   const pathname = usePathname()
+  const isAdmin = !!(user.isPlatformAdmin || user.isConsoleAdmin)
+  const footerItems: NavItem[] = isAdmin ? [SETTINGS_ITEM] : []
 
   return (
     <Sidebar collapsible="icon">
@@ -95,7 +109,7 @@ export function ConsoleSidebar({
 
       <SidebarFooter>
         <SidebarMenu>
-          {FOOTER.map((item) => (
+          {footerItems.map((item) => (
             <NavLink key={item.href} item={item} pathname={pathname} />
           ))}
           <SidebarMenuItem>

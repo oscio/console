@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common"
 import { AppController } from "./app.controller"
 import { AccountsModule } from "./accounts/accounts.module"
+import { AdminModule } from "./admin/admin.module"
 import { AgentChatModule } from "./agent-chat/agent-chat.module"
 import { AgentsModule } from "./agents/agents.module"
 import { OpenFgaModule } from "./openfga/openfga.module"
@@ -19,6 +20,7 @@ import { VolumesModule } from "./volumes/volumes.module"
     AgentsModule,
     AgentChatModule,
     LoadBalancersModule,
+    AdminModule,
   ],
   controllers: [AppController],
 })

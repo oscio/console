@@ -22,6 +22,7 @@ import {
   AgentStatus,
   AgentType,
   CreateAgentInput,
+  GLOBAL_AGENT_ENV_SECRET,
 } from "./agents.types"
 
 function sanitizeLabel(value: string): string {
@@ -230,6 +231,13 @@ export class AgentsService {
       )
       volumeMounts = [
         { name: "workspace", mountPath: "/home/coder/workspace" },
+        // The agent runs as uid 1000 but Secret-mounted files are
+        // owned by root with mode 0400, so the agent can't read its
+        // own SSH key. We can't fix that with `defaultMode` (ssh
+        // rejects group-readable keys with "bad permissions") or
+        // `fsGroup` (Secrets aren't chowned by fsGroup the way PVCs
+        // are). Instead, the init container below copies the key
+        // into this in-memory emptyDir with the right ownership.
         { name: "agent-ssh", mountPath: "/etc/agent-ssh", readOnly: true },
       ]
       volumes = [
@@ -238,12 +246,16 @@ export class AgentsService {
           persistentVolumeClaim: { claimName: input.workspaceVolumeSlug },
         },
         {
-          name: "agent-ssh",
+          name: "agent-ssh-src",
           secret: {
             secretName: input.sshKeySecretName,
             defaultMode: 0o400,
             items: [{ key: "id_ed25519", path: "id_ed25519" }],
           },
+        },
+        {
+          name: "agent-ssh",
+          emptyDir: { medium: "Memory" },
         },
       ]
       affinity = {
@@ -266,18 +278,20 @@ export class AgentsService {
       )
     }
 
-    // User-supplied env (LLM API keys etc.) goes into a per-agent
-    // Secret, mounted with envFrom so values stay opaque in the
-    // pod spec. Skipped when no env was passed.
-    const userEnv = input.env ?? {}
-    const userEnvKeys = Object.keys(userEnv).filter((k) => k.length > 0)
+    // Per-agent env Secret. Today it only carries the user's chosen
+    // model (ZEROCLAW_DEFAULT_MODEL), but the same Secret is the
+    // place to add any future per-pod settings without touching the
+    // pod spec — entrypoint reads via envFrom. Skipped when there's
+    // nothing pod-specific to set (hermes, or zeroclaw with default
+    // model). Provider credentials (OPENROUTER_API_KEY etc.) live in
+    // the cluster-wide GLOBAL_AGENT_ENV_SECRET, attached separately.
+    const perPodEnv: Record<string, string> = {}
+    if (input.agentType === "zeroclaw" && input.model) {
+      perPodEnv.ZEROCLAW_DEFAULT_MODEL = input.model
+    }
     let envFromSecretName: string | null = null
-    if (userEnvKeys.length > 0) {
+    if (Object.keys(perPodEnv).length > 0) {
       envFromSecretName = `agent-env-${slug}`
-      const stringData: Record<string, string> = {}
-      for (const k of userEnvKeys) {
-        stringData[k] = userEnv[k] ?? ""
-      }
       await k8sCore()
         .createNamespacedSecret({
           namespace: ns,
@@ -290,7 +304,7 @@ export class AgentsService {
               labels: this.agentLabels(ownerId, input.agentType, input.boundToVm),
             },
             type: "Opaque",
-            stringData,
+            stringData: perPodEnv,
           },
         })
         .catch((err) =>
@@ -325,6 +339,24 @@ export class AgentsService {
                 },
               },
               spec: ({
+                ...(isBound
+                  ? {
+                      initContainers: [
+                        {
+                          name: "agent-ssh-prep",
+                          image: "busybox:1.37",
+                          command: ["sh", "-c"],
+                          args: [
+                            "install -m 0400 -o 1000 -g 1000 /etc/agent-ssh-src/id_ed25519 /etc/agent-ssh/id_ed25519",
+                          ],
+                          volumeMounts: [
+                            { name: "agent-ssh-src", mountPath: "/etc/agent-ssh-src", readOnly: true },
+                            { name: "agent-ssh", mountPath: "/etc/agent-ssh" },
+                          ],
+                        },
+                      ],
+                    }
+                  : {}),
                 containers: [
                   {
                     name: "agent",
@@ -333,13 +365,22 @@ export class AgentsService {
                     // AGENT_PORT is the FastAPI listen port.
                     ports: [{ name: "http", containerPort: AGENT_PORT }],
                     env,
-                    ...(envFromSecretName
-                      ? {
-                          envFrom: [
-                            { secretRef: { name: envFromSecretName } },
-                          ],
-                        }
-                      : {}),
+                    // Always attach the cluster-wide secret (optional
+                    // so the pod still schedules even before an admin
+                    // populates it). Per-agent secret is layered on
+                    // top — last write wins on duplicate keys, but
+                    // we only put pod-specific overrides there.
+                    envFrom: [
+                      {
+                        secretRef: {
+                          name: GLOBAL_AGENT_ENV_SECRET,
+                          optional: true,
+                        },
+                      },
+                      ...(envFromSecretName
+                        ? [{ secretRef: { name: envFromSecretName } }]
+                        : []),
+                    ],
                     volumeMounts,
                   },
                 ],

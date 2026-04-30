@@ -24,6 +24,12 @@ type Task = {
 
 const TERMINAL = new Set(["done", "failed", "interrupted"])
 
+type TaskMeta = {
+  task_id: string
+  status: "running" | "done" | "failed" | "interrupted"
+  started_at?: number
+}
+
 export function ChatView({
   slug,
   sessionId,
@@ -31,22 +37,75 @@ export function ChatView({
   slug: string
   sessionId: string
 }) {
-  const [events, setEvents] = useState<Event[]>([])
+  // Events for tasks that have already finished — loaded once on
+  // mount, stays put across new prompts.
+  const [historyEvents, setHistoryEvents] = useState<Event[]>([])
+  // Events for the currently in-flight task — replaced wholesale on
+  // every poll tick; merged into history once the task terminates.
+  const [liveEvents, setLiveEvents] = useState<Event[]>([])
   const [prompt, setPrompt] = useState("")
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [taskId, setTaskId] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const logRef = useRef<HTMLDivElement | null>(null)
+
+  const events = loaded ? [...historyEvents, ...liveEvents] : []
 
   // Auto-scroll to the latest event whenever the log changes.
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [events])
+  }, [events.length])
+
+  // Backfill the chat with prior tasks' events on mount so the user
+  // sees the full session, not just whatever came after a refresh.
+  // The wrapper exposes /tasks?session_id=… for the meta listing and
+  // /tasks/<id> for full events; we walk them in chronological order.
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(
+          `/api/agents/${encodeURIComponent(slug)}/chat/tasks?session_id=${encodeURIComponent(sessionId)}`,
+          { cache: "no-store" },
+        )
+        if (!res.ok) throw new Error(`tasks list ${res.status}`)
+        const metas = (await res.json()) as TaskMeta[]
+        const finished = metas
+          .filter((m) => TERMINAL.has(m.status))
+          .sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0))
+        const all: Event[] = []
+        for (const m of finished) {
+          const r = await fetch(
+            `/api/agents/${encodeURIComponent(slug)}/chat/tasks/${encodeURIComponent(m.task_id)}`,
+            { cache: "no-store" },
+          )
+          if (!r.ok) continue
+          const task = (await r.json()) as Task
+          for (const ev of task.events ?? []) all.push(ev)
+        }
+        if (!cancelled) {
+          setHistoryEvents(all)
+          setLoaded(true)
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError((e as Error).message)
+          setLoaded(true)
+        }
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [slug, sessionId])
 
   // Poll the active task. Stops when the task hits a terminal state
   // or the component unmounts. We re-fetch the *whole* events array
-  // each tick — the wrapper's response includes the full backlog,
-  // so dedup/append cleverness isn't needed.
+  // each tick — the wrapper's response includes the full backlog —
+  // and on terminal, fold the live events into history so they stay
+  // visible after the next prompt clears liveEvents.
   useEffect(() => {
     if (!taskId) return
     let cancelled = false
@@ -62,8 +121,10 @@ export function ChatView({
         }
         const task = (await res.json()) as Task
         if (cancelled) return
-        setEvents(task.events ?? [])
+        setLiveEvents(task.events ?? [])
         if (TERMINAL.has(task.status)) {
+          setHistoryEvents((prev) => [...prev, ...(task.events ?? [])])
+          setLiveEvents([])
           setTaskId(null)
           return
         }

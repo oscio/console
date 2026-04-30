@@ -24,7 +24,7 @@ import {
 } from "@workspace/ui/components/select"
 import { Slider } from "@workspace/ui/components/slider"
 import type { Volume } from "@/lib/api"
-import { AGENT_ENV } from "@/lib/agent-env"
+import { type AgentModel, DEFAULT_AGENT_MODEL } from "@/lib/agent-models"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -37,11 +37,14 @@ type Mode = "new" | "attach" | "none"
 export function NewVmForm({
   action,
   freeVolumes,
+  models,
 }: {
   action: Action
   // Volumes the current user owns that aren't bound to any VM —
   // shown in the "Attach existing" dropdown.
   freeVolumes: Volume[]
+  // OpenRouter model catalog for the attached-agent dropdown.
+  models: AgentModel[]
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -63,18 +66,11 @@ export function NewVmForm({
   const [agentType, setAgentType] = useState<"none" | "hermes" | "zeroclaw">(
     "none",
   )
-  const [agentEnvValues, setAgentEnvValues] = useState<Record<string, string>>(
-    {},
-  )
-  const agentEnvFields =
-    agentType !== "none" ? (AGENT_ENV[agentType] ?? []) : []
-  const agentEnvPayload = JSON.stringify(
-    Object.fromEntries(
-      agentEnvFields
-        .map((f) => [f.name, agentEnvValues[f.name] ?? ""] as const)
-        .filter(([, v]) => v.length > 0),
-    ),
-  )
+  const initialAgentModel =
+    models.find((m) => m.id === DEFAULT_AGENT_MODEL)?.id ??
+    models[0]?.id ??
+    DEFAULT_AGENT_MODEL
+  const [agentModel, setAgentModel] = useState<string>(initialAgentModel)
 
   // Multiple LBs per VM. Each item becomes one ClusterIP Service +
   // HTTPRoute pair on the api side. `key` is React-only — stripped
@@ -306,18 +302,17 @@ export function NewVmForm({
             <input type="hidden" name="agentType" value={agentType} />
             <Select
               value={agentType}
-              onValueChange={(v) => {
+              onValueChange={(v) =>
                 setAgentType(v as "none" | "hermes" | "zeroclaw")
-                setAgentEnvValues({})
-              }}
+              }
             >
               <SelectTrigger id="vm-agent-type" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No agent</SelectItem>
-                <SelectItem value="hermes">hermes</SelectItem>
                 <SelectItem value="zeroclaw">zeroclaw</SelectItem>
+                <SelectItem value="hermes">hermes</SelectItem>
               </SelectContent>
             </Select>
             {agentType !== "none" && (
@@ -327,38 +322,35 @@ export function NewVmForm({
                   <code>boundToVm = &lt;this VM&gt;</code>. Cascade-deleted
                   with the VM.
                 </p>
-                <input type="hidden" name="agentEnv" value={agentEnvPayload} />
-                {agentEnvFields.length > 0 && (
-                  <div className="space-y-3 border p-3">
-                    <p className="text-xs font-medium">Environment</p>
-                    {agentEnvFields.map((f) => (
-                      <div key={f.name} className="space-y-1.5">
-                        <Label
-                          htmlFor={`vm-agent-env-${f.name}`}
-                          className="text-xs"
-                        >
-                          {f.label}
-                        </Label>
-                        <Input
-                          id={`vm-agent-env-${f.name}`}
-                          type={f.secret ? "password" : "text"}
-                          autoComplete="off"
-                          value={agentEnvValues[f.name] ?? ""}
-                          onChange={(e) =>
-                            setAgentEnvValues((prev) => ({
-                              ...prev,
-                              [f.name]: e.target.value,
-                            }))
-                          }
-                          placeholder={f.name}
-                        />
-                        {f.hint && (
-                          <p className="text-muted-foreground text-xs">
-                            {f.hint}
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                {agentType === "zeroclaw" && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="vm-agent-model" className="text-xs">
+                      Model
+                    </Label>
+                    <input
+                      type="hidden"
+                      name="agentModel"
+                      value={agentModel}
+                    />
+                    <Select value={agentModel} onValueChange={setAgentModel}>
+                      <SelectTrigger
+                        id="vm-agent-model"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs">
+                      Routed via OpenRouter. Provider key is platform-wide
+                      (set in <code>/settings</code>).
+                    </p>
                   </div>
                 )}
               </>

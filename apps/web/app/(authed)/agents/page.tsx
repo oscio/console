@@ -18,6 +18,7 @@ import {
   deleteAgent,
   fetchAgents,
 } from "@/lib/api"
+import { fetchAgentModels } from "@/lib/agent-models"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { DeleteAgentButton, NewAgentForm } from "./new-agent-form"
 
@@ -25,26 +26,12 @@ async function createAgentAction(formData: FormData) {
   "use server"
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
-  const agentType = String(formData.get("agentType") ?? "hermes") as AgentType
-  const envRaw = String(formData.get("env") ?? "")
-  let env: Record<string, string> | undefined
-  if (envRaw) {
-    try {
-      const parsed = JSON.parse(envRaw) as unknown
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const cleaned: Record<string, string> = {}
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          if (typeof v === "string" && v.length > 0) cleaned[k] = v
-        }
-        if (Object.keys(cleaned).length) env = cleaned
-      }
-    } catch {
-      return { error: "invalid env payload" }
-    }
-  }
+  const agentType = String(formData.get("agentType") ?? "zeroclaw") as AgentType
+  const modelRaw = String(formData.get("model") ?? "").trim()
+  const model = modelRaw.length > 0 ? modelRaw : undefined
   if (!name) return { error: "name is required" }
   try {
-    await createAgent(cookieHeader, { name, agentType, env })
+    await createAgent(cookieHeader, { name, agentType, model })
   } catch (err) {
     return { error: (err as Error).message }
   }
@@ -62,7 +49,10 @@ async function deleteAgentAction(formData: FormData) {
 
 export default async function AgentsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
-  const agents = await fetchAgents(cookieHeader)
+  const [agents, models] = await Promise.all([
+    fetchAgents(cookieHeader),
+    fetchAgentModels(),
+  ])
 
   return (
     <div className="space-y-6">
@@ -75,7 +65,9 @@ export default async function AgentsPage() {
             account.
           </p>
         </div>
-        {agents !== null && <NewAgentForm action={createAgentAction} />}
+        {agents !== null && (
+          <NewAgentForm action={createAgentAction} models={models} />
+        )}
       </div>
 
       {agents === null ? (

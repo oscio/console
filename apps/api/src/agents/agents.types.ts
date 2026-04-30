@@ -34,10 +34,11 @@ export type Agent = {
 export type CreateAgentInput = {
   name: string
   agentType: AgentType
-  // User-supplied env vars (LLM API keys, provider config, etc.).
-  // Stored in a per-agent Secret and injected into the agent
-  // container via envFrom. Empty / undefined = no extra env.
-  env?: Record<string, string>
+  // OpenRouter model id surfaced to the pod as ZEROCLAW_DEFAULT_MODEL.
+  // Shape-validated against AGENT_MODEL_RE at the controller boundary;
+  // ignored for hermes (which has its own provider config). When
+  // unset, entrypoint.sh's hard default applies.
+  model?: string
   // Optional VM slug to attach to. When set, the agent pod gets the
   // SSH shim wired (SSH_HOST = <boundToVm>.resource.svc, SSH_KEY =
   // mounted Secret) and mounts the same workspace PVC the VM does.
@@ -70,3 +71,16 @@ export const AGENT_DISPLAY_NAME_ANNOTATION =
 // The agent gateway speaks on a fixed port. Static so the pod, the
 // Service, and the HTTPRoute all agree without extra wiring.
 export const AGENT_PORT = 8000
+
+// Server-side shape check for the model id supplied at create time.
+// The web layer fetches the live OpenRouter catalog (so the dropdown
+// stays in sync with reality) — we don't try to mirror that catalog
+// here. This regex matches the `provider/model[:tag]` shape openrouter
+// emits and rejects anything that could be confused for a path or
+// shell metachar.
+export const AGENT_MODEL_RE = /^[a-z0-9._-]+\/[a-zA-Z0-9._:+-]+$/
+
+// Cluster-wide Secret holding shared agent env (OPENROUTER_API_KEY
+// and friends). Mounted via envFrom on every agent pod, alongside
+// the per-agent Secret. Managed in /settings by console-admins.
+export const GLOBAL_AGENT_ENV_SECRET = "agent-platform-global-env"

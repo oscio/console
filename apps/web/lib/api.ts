@@ -144,7 +144,8 @@ export async function createVm(
       port: number
       persistOnVmDelete?: boolean
     }>
-    agentEnv?: Record<string, string>
+    // OpenRouter model id for the attached agent (zeroclaw only).
+    agentModel?: string
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {
@@ -215,7 +216,9 @@ export async function createAgent(
   input: {
     name: string
     agentType: AgentType
-    env?: Record<string, string>
+    // OpenRouter model id (zeroclaw only — ignored for hermes).
+    // Surfaces as ZEROCLAW_DEFAULT_MODEL on the pod.
+    model?: string
   },
 ): Promise<Agent> {
   const res = await fetch(`${API_URL}/agents`, {
@@ -516,5 +519,47 @@ export async function deleteLoadBalancer(
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => "")
     throw new Error(`loadbalancers delete failed: ${res.status} ${text}`)
+  }
+}
+
+// Global agent env (cluster-wide Secret keyed by env-var name).
+// The api returns plain values for admins so the settings UI can
+// show what's currently stored. Endpoint is admin-gated.
+
+export type GlobalEnvKey = { name: string; value: string }
+
+export async function fetchGlobalEnv(
+  cookieHeader: string,
+): Promise<GlobalEnvKey[] | null> {
+  const res = await fetch(`${API_URL}/admin/global-env`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) {
+    throw new Error(`admin/global-env failed: ${res.status}`)
+  }
+  const body = (await res.json()) as { keys: GlobalEnvKey[] }
+  return body.keys
+}
+
+// Empty string clears the key (treated as a delete on the api).
+export async function setGlobalEnv(
+  cookieHeader: string,
+  key: string,
+  value: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/admin/global-env/${encodeURIComponent(key)}`,
+    {
+      method: "PUT",
+      headers: { cookie: cookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ value }),
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`global-env put failed: ${res.status} ${text}`)
   }
 }

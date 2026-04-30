@@ -21,6 +21,7 @@ import {
   type VmStatus,
   type VmVolumeMode,
 } from "@/lib/api"
+import { fetchAgentModels } from "@/lib/agent-models"
 import { AutoRefresh } from "@/components/auto-refresh"
 import { DeleteVmButton, NewVmForm } from "./new-vm-form"
 
@@ -64,24 +65,11 @@ async function createVmAction(formData: FormData) {
   } catch {
     return { error: "invalid load balancers payload" }
   }
-  let agentEnv: Record<string, string> | undefined
-  if (agentType !== "none") {
-    const envRaw = String(formData.get("agentEnv") ?? "")
-    if (envRaw) {
-      try {
-        const parsed = JSON.parse(envRaw) as unknown
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const cleaned: Record<string, string> = {}
-          for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-            if (typeof v === "string" && v.length > 0) cleaned[k] = v
-          }
-          if (Object.keys(cleaned).length) agentEnv = cleaned
-        }
-      } catch {
-        return { error: "invalid agent env payload" }
-      }
-    }
-  }
+  const agentModelRaw = String(formData.get("agentModel") ?? "").trim()
+  const agentModel =
+    agentType === "zeroclaw" && agentModelRaw.length > 0
+      ? agentModelRaw
+      : undefined
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -95,7 +83,7 @@ async function createVmAction(formData: FormData) {
       persistVolumeOnDelete,
       volumeSlug,
       loadBalancers: loadBalancers.length ? loadBalancers : undefined,
-      agentEnv,
+      agentModel,
     })
   } catch (err) {
     return { error: (err as Error).message }
@@ -118,9 +106,10 @@ async function deleteVmAction(formData: FormData) {
 
 export default async function VmsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
-  const [vms, volumes] = await Promise.all([
+  const [vms, volumes, models] = await Promise.all([
     fetchVms(cookieHeader),
     fetchVolumes(cookieHeader),
+    fetchAgentModels(),
   ])
   const freeVolumes = (volumes ?? []).filter((v) => !v.boundTo)
 
@@ -135,7 +124,11 @@ export default async function VmsPage() {
           </p>
         </div>
         {vms !== null && (
-          <NewVmForm action={createVmAction} freeVolumes={freeVolumes} />
+          <NewVmForm
+            action={createVmAction}
+            freeVolumes={freeVolumes}
+            models={models}
+          />
         )}
       </div>
 

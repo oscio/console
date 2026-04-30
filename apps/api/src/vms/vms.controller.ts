@@ -12,7 +12,7 @@ import {
   UseGuards,
 } from "@nestjs/common"
 import { type AppSession } from "@workspace/auth"
-import { sanitizeEnvMap } from "../agents/agents.controller"
+import { AGENT_MODEL_RE } from "../agents/agents.types"
 import { AuthGuard } from "../auth/auth.guard"
 import { ConsoleAdminGuard, PLATFORM_ADMIN_GROUP } from "../auth/admin.guard"
 import { CurrentSession } from "../auth/session.decorator"
@@ -120,6 +120,19 @@ export class VmsController {
           }
         })
       : undefined
+    let agentModel: string | undefined
+    if (
+      agentType !== "none" &&
+      typeof body.agentModel === "string" &&
+      body.agentModel.length > 0
+    ) {
+      if (!AGENT_MODEL_RE.test(body.agentModel)) {
+        throw new BadRequestException(
+          "agentModel must look like 'provider/model-id' (OpenRouter shape)",
+        )
+      }
+      agentModel = body.agentModel
+    }
     return this.vms.create(session.user.id, {
       name,
       imageType,
@@ -133,7 +146,7 @@ export class VmsController {
       persistVolumeOnDelete: !!body.persistVolumeOnDelete,
       volumeSlug: body.volumeSlug,
       loadBalancers,
-      agentEnv: sanitizeEnvMap(body.agentEnv),
+      agentModel,
     })
   }
 

@@ -59,10 +59,9 @@ export type CreateVmInput = {
   // For "attach": slug of the existing free volume.
   volumeSlug?: string
 
-  // User-supplied env vars to inject into the attached agent's
-  // container (LLM API keys, etc.). Forwarded as-is to
-  // AgentsService.create's `env`. Ignored when agentType="none".
-  agentEnv?: Record<string, string>
+  // OpenRouter model id for the attached agent. Forwarded as-is to
+  // AgentsService.create's `model`. Ignored when agentType="none".
+  agentModel?: string
 
   // Optional convenience LBs. The api creates one LoadBalancer per
   // entry pointing at the new VM. Empty/undefined = no LBs at create
