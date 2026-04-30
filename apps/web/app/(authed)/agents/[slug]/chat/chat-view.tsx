@@ -1,6 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Button } from "@workspace/ui/components/button"
 import { CopyableId } from "@/components/copyable-id"
 
@@ -268,7 +270,22 @@ function EventRow({ ev }: { ev: Event }) {
           >
             {role}
           </span>
-          <pre className="whitespace-pre-wrap break-words">{content}</pre>
+          {role === "assistant" ? (
+            // Assistant content is markdown — render structure (code
+            // blocks, lists, headings, tables) but keep the body
+            // monospace as the user expects "agent CLI"-style output.
+            // Tailwind's `prose` plugin isn't loaded, so we hand-style
+            // the elements we'll actually see.
+            <div className="font-mono text-sm whitespace-pre-wrap break-words [&>*]:my-1 [&_a]:underline [&_pre]:bg-muted/40 [&_pre]:rounded [&_pre]:px-2 [&_pre]:py-1 [&_pre]:overflow-x-auto [&_code]:bg-muted/40 [&_code]:rounded [&_code]:px-1 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-bold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_table]:border-collapse [&_th]:border [&_th]:px-2 [&_td]:border [&_td]:px-2">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {stripAnsi(content)}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <pre className="font-mono text-sm whitespace-pre-wrap break-words">
+              {content}
+            </pre>
+          )}
         </div>
       )
     }
