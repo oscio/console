@@ -34,6 +34,10 @@ export type Agent = {
 export type CreateAgentInput = {
   name: string
   agentType: AgentType
+  // User-supplied env vars (LLM API keys, provider config, etc.).
+  // Stored in a per-agent Secret and injected into the agent
+  // container via envFrom. Empty / undefined = no extra env.
+  env?: Record<string, string>
   // Optional VM slug to attach to. When set, the agent pod gets the
   // SSH shim wired (SSH_HOST = <boundToVm>.resource.svc, SSH_KEY =
   // mounted Secret) and mounts the same workspace PVC the VM does.

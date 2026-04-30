@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import { AGENT_ENV } from "@/lib/agent-env"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -33,6 +34,18 @@ export function NewAgentForm({ action }: { action: Action }) {
   // shadcn Select renders a Radix Listbox, not a native <select>, so
   // mirror its value into a hidden input for FormData.
   const [agentType, setAgentType] = useState<"hermes" | "zeroclaw">("hermes")
+  // Local map of user-entered env values, keyed by env-var name.
+  // Reset every time agentType flips so the modal doesn't carry
+  // stale values across types.
+  const [envValues, setEnvValues] = useState<Record<string, string>>({})
+  const fields = AGENT_ENV[agentType] ?? []
+  const envPayload = JSON.stringify(
+    Object.fromEntries(
+      fields
+        .map((f) => [f.name, envValues[f.name] ?? ""] as const)
+        .filter(([, v]) => v.length > 0),
+    ),
+  )
 
   return (
     <Dialog
@@ -93,7 +106,10 @@ export function NewAgentForm({ action }: { action: Action }) {
             <input type="hidden" name="agentType" value={agentType} />
             <Select
               value={agentType}
-              onValueChange={(v) => setAgentType(v as "hermes" | "zeroclaw")}
+              onValueChange={(v) => {
+                setAgentType(v as "hermes" | "zeroclaw")
+                setEnvValues({})
+              }}
             >
               <SelectTrigger id="agent-type" className="w-full">
                 <SelectValue />
@@ -104,6 +120,41 @@ export function NewAgentForm({ action }: { action: Action }) {
               </SelectContent>
             </Select>
           </Field>
+
+          {fields.length > 0 && (
+            <div className="space-y-3">
+              <div>
+                <Label>Environment</Label>
+                <p className="text-muted-foreground text-xs">
+                  Stored in a per-agent k8s Secret and injected into the
+                  agent container via <code>envFrom</code>.
+                </p>
+              </div>
+              <input type="hidden" name="env" value={envPayload} />
+              {fields.map((f) => (
+                <Field
+                  key={f.name}
+                  id={`agent-env-${f.name}`}
+                  label={f.label}
+                  hint={f.hint}
+                >
+                  <Input
+                    id={`agent-env-${f.name}`}
+                    type={f.secret ? "password" : "text"}
+                    autoComplete="off"
+                    value={envValues[f.name] ?? ""}
+                    onChange={(e) =>
+                      setEnvValues((prev) => ({
+                        ...prev,
+                        [f.name]: e.target.value,
+                      }))
+                    }
+                    placeholder={f.name}
+                  />
+                </Field>
+              ))}
+            </div>
+          )}
 
           {error && (
             <p

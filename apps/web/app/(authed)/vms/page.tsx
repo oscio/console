@@ -64,6 +64,24 @@ async function createVmAction(formData: FormData) {
   } catch {
     return { error: "invalid load balancers payload" }
   }
+  let agentEnv: Record<string, string> | undefined
+  if (agentType !== "none") {
+    const envRaw = String(formData.get("agentEnv") ?? "")
+    if (envRaw) {
+      try {
+        const parsed = JSON.parse(envRaw) as unknown
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const cleaned: Record<string, string> = {}
+          for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof v === "string" && v.length > 0) cleaned[k] = v
+          }
+          if (Object.keys(cleaned).length) agentEnv = cleaned
+        }
+      } catch {
+        return { error: "invalid agent env payload" }
+      }
+    }
+  }
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -77,6 +95,7 @@ async function createVmAction(formData: FormData) {
       persistVolumeOnDelete,
       volumeSlug,
       loadBalancers: loadBalancers.length ? loadBalancers : undefined,
+      agentEnv,
     })
   } catch (err) {
     return { error: (err as Error).message }

@@ -24,6 +24,7 @@ import {
 } from "@workspace/ui/components/select"
 import { Slider } from "@workspace/ui/components/slider"
 import type { Volume } from "@/lib/api"
+import { AGENT_ENV } from "@/lib/agent-env"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -61,6 +62,18 @@ export function NewVmForm({
   // under /agents (boundToVm = this VM's slug).
   const [agentType, setAgentType] = useState<"none" | "hermes" | "zeroclaw">(
     "none",
+  )
+  const [agentEnvValues, setAgentEnvValues] = useState<Record<string, string>>(
+    {},
+  )
+  const agentEnvFields =
+    agentType !== "none" ? (AGENT_ENV[agentType] ?? []) : []
+  const agentEnvPayload = JSON.stringify(
+    Object.fromEntries(
+      agentEnvFields
+        .map((f) => [f.name, agentEnvValues[f.name] ?? ""] as const)
+        .filter(([, v]) => v.length > 0),
+    ),
   )
 
   // Multiple LBs per VM. Each item becomes one ClusterIP Service +
@@ -293,9 +306,10 @@ export function NewVmForm({
             <input type="hidden" name="agentType" value={agentType} />
             <Select
               value={agentType}
-              onValueChange={(v) =>
+              onValueChange={(v) => {
                 setAgentType(v as "none" | "hermes" | "zeroclaw")
-              }
+                setAgentEnvValues({})
+              }}
             >
               <SelectTrigger id="vm-agent-type" className="w-full">
                 <SelectValue />
@@ -307,11 +321,47 @@ export function NewVmForm({
               </SelectContent>
             </Select>
             {agentType !== "none" && (
-              <p className="text-muted-foreground text-xs">
-                The agent appears under <code>/agents</code> with{" "}
-                <code>boundToVm = &lt;this VM&gt;</code>. Cascade-deleted
-                with the VM.
-              </p>
+              <>
+                <p className="text-muted-foreground text-xs">
+                  The agent appears under <code>/agents</code> with{" "}
+                  <code>boundToVm = &lt;this VM&gt;</code>. Cascade-deleted
+                  with the VM.
+                </p>
+                <input type="hidden" name="agentEnv" value={agentEnvPayload} />
+                {agentEnvFields.length > 0 && (
+                  <div className="space-y-3 border p-3">
+                    <p className="text-xs font-medium">Environment</p>
+                    {agentEnvFields.map((f) => (
+                      <div key={f.name} className="space-y-1.5">
+                        <Label
+                          htmlFor={`vm-agent-env-${f.name}`}
+                          className="text-xs"
+                        >
+                          {f.label}
+                        </Label>
+                        <Input
+                          id={`vm-agent-env-${f.name}`}
+                          type={f.secret ? "password" : "text"}
+                          autoComplete="off"
+                          value={agentEnvValues[f.name] ?? ""}
+                          onChange={(e) =>
+                            setAgentEnvValues((prev) => ({
+                              ...prev,
+                              [f.name]: e.target.value,
+                            }))
+                          }
+                          placeholder={f.name}
+                        />
+                        {f.hint && (
+                          <p className="text-muted-foreground text-xs">
+                            {f.hint}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
 

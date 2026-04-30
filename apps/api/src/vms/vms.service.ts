@@ -450,6 +450,7 @@ export class VmsService {
         boundToVm: slug,
         workspaceVolumeSlug: volumeSlug,
         sshKeySecretName,
+        env: input.agentEnv,
       })
     } else if (wantAgent) {
       throw new BadRequestException(

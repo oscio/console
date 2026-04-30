@@ -26,9 +26,25 @@ async function createAgentAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
   const agentType = String(formData.get("agentType") ?? "hermes") as AgentType
+  const envRaw = String(formData.get("env") ?? "")
+  let env: Record<string, string> | undefined
+  if (envRaw) {
+    try {
+      const parsed = JSON.parse(envRaw) as unknown
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const cleaned: Record<string, string> = {}
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof v === "string" && v.length > 0) cleaned[k] = v
+        }
+        if (Object.keys(cleaned).length) env = cleaned
+      }
+    } catch {
+      return { error: "invalid env payload" }
+    }
+  }
   if (!name) return { error: "name is required" }
   try {
-    await createAgent(cookieHeader, { name, agentType })
+    await createAgent(cookieHeader, { name, agentType, env })
   } catch (err) {
     return { error: (err as Error).message }
   }

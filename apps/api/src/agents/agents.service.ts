@@ -266,6 +266,38 @@ export class AgentsService {
       )
     }
 
+    // User-supplied env (LLM API keys etc.) goes into a per-agent
+    // Secret, mounted with envFrom so values stay opaque in the
+    // pod spec. Skipped when no env was passed.
+    const userEnv = input.env ?? {}
+    const userEnvKeys = Object.keys(userEnv).filter((k) => k.length > 0)
+    let envFromSecretName: string | null = null
+    if (userEnvKeys.length > 0) {
+      envFromSecretName = `agent-env-${slug}`
+      const stringData: Record<string, string> = {}
+      for (const k of userEnvKeys) {
+        stringData[k] = userEnv[k] ?? ""
+      }
+      await k8sCore()
+        .createNamespacedSecret({
+          namespace: ns,
+          body: {
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {
+              name: envFromSecretName,
+              namespace: ns,
+              labels: this.agentLabels(ownerId, input.agentType, input.boundToVm),
+            },
+            type: "Opaque",
+            stringData,
+          },
+        })
+        .catch((err) =>
+          rethrowK8sError(err, `Failed to create env Secret for ${slug}`),
+        )
+    }
+
     const apps = k8sApps()
     try {
       await apps.createNamespacedStatefulSet({
@@ -301,6 +333,13 @@ export class AgentsService {
                     // AGENT_PORT is the FastAPI listen port.
                     ports: [{ name: "http", containerPort: AGENT_PORT }],
                     env,
+                    ...(envFromSecretName
+                      ? {
+                          envFrom: [
+                            { secretRef: { name: envFromSecretName } },
+                          ],
+                        }
+                      : {}),
                     volumeMounts,
                   },
                 ],
@@ -391,6 +430,11 @@ export class AgentsService {
       })
     await core
       .deleteNamespacedService({ name: cleanSlug, namespace: ns })
+      .catch(() => undefined)
+    // Per-agent env Secret. May not exist (only created when caller
+    // passed input.env at create time) — 404 is fine.
+    await core
+      .deleteNamespacedSecret({ name: `agent-env-${cleanSlug}`, namespace: ns })
       .catch(() => undefined)
     await this.deleteHttpRoute(ns, cleanSlug).catch(() => undefined)
     const owners = await this.fga

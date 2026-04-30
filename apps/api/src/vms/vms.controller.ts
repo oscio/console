@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from "@nestjs/common"
 import { type AppSession } from "@workspace/auth"
+import { sanitizeEnvMap } from "../agents/agents.controller"
 import { AuthGuard } from "../auth/auth.guard"
 import { ConsoleAdminGuard, PLATFORM_ADMIN_GROUP } from "../auth/admin.guard"
 import { CurrentSession } from "../auth/session.decorator"
@@ -132,6 +133,7 @@ export class VmsController {
       persistVolumeOnDelete: !!body.persistVolumeOnDelete,
       volumeSlug: body.volumeSlug,
       loadBalancers,
+      agentEnv: sanitizeEnvMap(body.agentEnv),
     })
   }
 

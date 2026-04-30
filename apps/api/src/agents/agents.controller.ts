@@ -88,9 +88,11 @@ export class AgentsController {
         `agentType must be one of: ${[...ALLOWED_AGENT].join(", ")}`,
       )
     }
+    const env = sanitizeEnvMap(body.env)
     return this.agents.create(session.user.id, {
       name,
       agentType,
+      env,
     })
   }
 
@@ -109,4 +111,20 @@ export class AgentsController {
 function extractAgentSlug(host: string): string | null {
   const match = /^(agent-[a-f0-9]{8})\./.exec(host)
   return match?.[1] ?? null
+}
+
+// Reject malformed env payloads — we want a flat string→string map.
+// Empty keys are dropped; non-string values are coerced to "" so a
+// half-filled form doesn't leak `undefined` into the Secret.
+export function sanitizeEnvMap(
+  raw: unknown,
+): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k !== "string" || k.length === 0) continue
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue
+    out[k] = typeof v === "string" ? v : ""
+  }
+  return Object.keys(out).length ? out : undefined
 }

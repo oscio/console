@@ -144,6 +144,7 @@ export async function createVm(
       port: number
       persistOnVmDelete?: boolean
     }>
+    agentEnv?: Record<string, string>
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {
@@ -214,6 +215,7 @@ export async function createAgent(
   input: {
     name: string
     agentType: AgentType
+    env?: Record<string, string>
   },
 ): Promise<Agent> {
   const res = await fetch(`${API_URL}/agents`, {
