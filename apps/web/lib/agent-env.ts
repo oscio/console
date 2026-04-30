@@ -17,14 +17,20 @@ export type AgentEnvField = {
 }
 
 export const AGENT_ENV: Record<AgentType, AgentEnvField[]> = {
-  // zeroclaw uses an LLM provider for the agent loop. Anthropic is
-  // the most-tested path; users can also drop OPENAI_API_KEY etc.
-  // and pass `--provider openai` via config later.
+  // zeroclaw can use either provider. Fill in one or both — the
+  // active one is picked via zeroclaw's --provider flag (configured
+  // separately) or via its $ZEROCLAW_HOME/config.toml.
   zeroclaw: [
     {
       name: "ANTHROPIC_API_KEY",
       label: "Anthropic API key",
-      hint: "Required by zeroclaw for Claude. Stored in a per-agent k8s Secret.",
+      hint: "Used by zeroclaw when --provider anthropic.",
+      secret: true,
+    },
+    {
+      name: "OPENAI_API_KEY",
+      label: "OpenAI API key",
+      hint: "Used by zeroclaw when --provider openai.",
       secret: true,
     },
   ],
