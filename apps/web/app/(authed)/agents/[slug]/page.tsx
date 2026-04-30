@@ -46,17 +46,6 @@ export default async function AgentDetailPage({
         <div className="mt-2 flex items-center gap-3">
           <h1 className="text-2xl font-semibold">{agent.name}</h1>
           <StatusBadge status={agent.status} />
-          {agent.boundToVm && (
-            <Badge variant="outline" className="font-mono text-xs">
-              sidecar of{" "}
-              <Link
-                href={`/vms/${agent.boundToVm}`}
-                className="ml-1 hover:underline"
-              >
-                {agent.boundToVm}
-              </Link>
-            </Badge>
-          )}
         </div>
         <p className="text-muted-foreground font-mono text-xs">{agent.slug}</p>
       </div>
