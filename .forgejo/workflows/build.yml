@@ -1,5 +1,7 @@
 name: console-build-and-push
 
+# Repo-level HARBOR_USER / HARBOR_TOKEN secrets are set explicitly
+# (org-level inheritance was unreliable in our Forgejo instance).
 # Builds the console-web and console-api images on push and pushes both to
 # the in-cluster Harbor. Mirrors the agent-sandbox build workflow:
 #   - runs on the `docker` runner pool (forgejo-runner pod with DinD sidecar)
