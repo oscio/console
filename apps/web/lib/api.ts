@@ -640,3 +640,43 @@ export async function setGlobalEnv(
     throw new Error(`global-env put failed: ${res.status} ${text}`)
   }
 }
+
+// Branding for the sign-in page (color OR image, title, optional
+// description). GET is public — sign-in page renders before auth —
+// PUT is admin-gated.
+
+export type Branding = {
+  color: string
+  imageUrl: string
+  title: string
+  description: string
+}
+
+export async function fetchBranding(
+  cookieHeader?: string,
+): Promise<Branding> {
+  const res = await fetch(`${API_URL}/branding`, {
+    headers: cookieHeader ? { cookie: cookieHeader } : {},
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    throw new Error(`branding fetch failed: ${res.status}`)
+  }
+  return (await res.json()) as Branding
+}
+
+export async function saveBranding(
+  cookieHeader: string,
+  branding: Branding,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/branding`, {
+    method: "PUT",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify(branding),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`branding put failed: ${res.status} ${text}`)
+  }
+}
