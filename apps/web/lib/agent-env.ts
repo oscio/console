@@ -17,20 +17,26 @@ export type AgentEnvField = {
 }
 
 export const AGENT_ENV: Record<AgentType, AgentEnvField[]> = {
-  // zeroclaw can use either provider. Fill in one or both — the
-  // active one is picked via zeroclaw's --provider flag (configured
-  // separately) or via its $ZEROCLAW_HOME/config.toml.
+  // zeroclaw supports openrouter / anthropic / openai. Default
+  // provider in v0.7.x is openrouter (anthropic/claude-sonnet-4).
+  // Filling at least one matching key is required for chat to work.
   zeroclaw: [
+    {
+      name: "OPENROUTER_API_KEY",
+      label: "OpenRouter API key",
+      hint: "Default provider. Required when zeroclaw runs --provider openrouter (the v0.7.x default).",
+      secret: true,
+    },
     {
       name: "ANTHROPIC_API_KEY",
       label: "Anthropic API key",
-      hint: "Used by zeroclaw when --provider anthropic.",
+      hint: "Used when zeroclaw is configured with --provider anthropic.",
       secret: true,
     },
     {
       name: "OPENAI_API_KEY",
       label: "OpenAI API key",
-      hint: "Used by zeroclaw when --provider openai.",
+      hint: "Used when zeroclaw is configured with --provider openai.",
       secret: true,
     },
   ],
