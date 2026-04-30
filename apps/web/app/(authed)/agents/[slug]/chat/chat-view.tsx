@@ -238,8 +238,11 @@ function EventRow({ ev }: { ev: Event }) {
   switch (ev.type) {
     case "task.started":
       return (
-        <p className="text-muted-foreground text-xs italic">
-          — task started ({String(ev.task_id ?? "").slice(0, 8)}…)
+        <p className="text-muted-foreground/60 text-xs">
+          task{" "}
+          <code className="font-mono select-all">
+            {String(ev.task_id ?? "")}
+          </code>
         </p>
       )
     case "message": {
