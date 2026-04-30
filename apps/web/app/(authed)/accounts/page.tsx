@@ -128,11 +128,8 @@ export default async function AccountsPage() {
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
                           {u.isPlatformAdmin ? (
-                            <span
-                              title="platform-admin is managed in Keycloak"
-                              className="text-muted-foreground text-xs"
-                            >
-                              keycloak-managed
+                            <span className="text-muted-foreground text-xs">
+                              —
                             </span>
                           ) : (
                             <form action={toggleConsoleAdmin}>
@@ -149,7 +146,7 @@ export default async function AccountsPage() {
                               </Button>
                             </form>
                           )}
-                          {u.id !== me?.id && (
+                          {u.id !== me?.id && u.id !== "system" && (
                             <DeleteUserButton
                               action={deleteUser}
                               userId={u.id}

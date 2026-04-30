@@ -68,6 +68,13 @@ export class AccountsController {
     if (userId === session.user.id) {
       throw new BadRequestException("Cannot delete your own account.")
     }
+    // The `system` user is the platform's own identity (owns
+    // resource-system / bootstrap tuples). Removing it would leave
+    // those resources unowned and break console-api startup paths
+    // that read from this row, so it's permanently undeletable.
+    if (userId === "system") {
+      throw new BadRequestException("The system account is permanent.")
+    }
 
     await this.fga.cleanupUserTuples(userId)
     const deleted = await this.accounts.deleteById(userId)
