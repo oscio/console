@@ -1,56 +1,17 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
-import { marked } from "marked"
-import { markedTerminal } from "marked-terminal"
-import { AnsiUp } from "ansi_up"
 import { Button } from "@workspace/ui/components/button"
 import { CopyableId } from "@/components/copyable-id"
 
 // Strip ANSI escape sequences (CSI + a few common alts). Tool output
 // from shell commands routinely includes color/cursor codes that
-// render as `[31m`-style garbage in <pre>. We use this for the
-// shell-result block where we *don't* want colour; the markdown
-// renderer below uses ANSI deliberately.
+// render as `[31m`-style garbage in <pre>. Cheapest path to readable
+// shell-result blocks; full colour rendering would need a lib that
+// works in the browser without dragging in Node deps.
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "")
-}
-
-// CLI-style markdown renderer. marked-terminal hands back ANSI text
-// (bold/italic/colour escapes + box-drawing tables via cli-table3);
-// AnsiUp turns the ANSI into HTML <span> color elements so the <pre>
-// looks like a terminal session. Two browser-compat shims:
-//   * `width: 80` so marked-terminal doesn't read process.stdout.columns
-//   * custom `code` returns the source as-is so cli-highlight isn't
-//     pulled in (it depends on Node `mz/fs` and the full highlight.js
-//     bundle ~2.6 MB). Code blocks still get terminal-style framing.
-let mdConfigured = false
-function configureMarked() {
-  if (mdConfigured) return
-  marked.use(
-    // marked-terminal returns a TerminalRenderer instance; marked v15
-    // wants a MarkedExtension. Their typings don't agree but the
-    // runtime shape is what marked.use accepts.
-    markedTerminal({
-      width: 80,
-      reflowText: false,
-      tab: 2,
-      unescape: true,
-      code: (code: string) => code,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any) as any,
-  )
-  mdConfigured = true
-}
-
-const ansiUp = new AnsiUp()
-ansiUp.use_classes = false
-
-function renderMarkdownAsTerminal(md: string): string {
-  configureMarked()
-  const ansi = marked.parse(md, { async: false }) as string
-  return ansiUp.ansi_to_html(ansi)
 }
 
 // Minimal chat surface. Each prompt → POST /tasks → poll GET /tasks/<id>
@@ -334,23 +295,9 @@ function EventRow({ ev }: { ev: Event }) {
           >
             {role}
           </span>
-          {role === "assistant" ? (
-            // Render the markdown the way a CLI viewer would — ANSI
-            // escapes for bold/italic/colour, box-drawing tables, list
-            // bullets — then turn those escapes into colored HTML
-            // spans inside a <pre>. End result reads like terminal
-            // output, which matches the rest of the chat shell.
-            <pre
-              className="font-mono text-sm whitespace-pre-wrap break-words"
-              dangerouslySetInnerHTML={{
-                __html: renderMarkdownAsTerminal(content),
-              }}
-            />
-          ) : (
-            <pre className="font-mono text-sm whitespace-pre-wrap break-words">
-              {content}
-            </pre>
-          )}
+          <pre className="font-mono text-sm whitespace-pre-wrap break-words">
+            {content}
+          </pre>
         </div>
       )
     }
