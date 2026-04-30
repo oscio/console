@@ -111,6 +111,10 @@ export function ChatView({
   // sees the full session, not just whatever came after a refresh.
   // The wrapper exposes /tasks?session_id=… for the meta listing and
   // /tasks/<id> for full events; we walk them in chronological order.
+  // Also picks up any task still running (i.e. left mid-flight when
+  // the user navigated away) and resumes the live poll for it so the
+  // chat reattaches to the in-flight task instead of silently
+  // dropping it.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -121,9 +125,16 @@ export function ChatView({
         )
         if (!res.ok) throw new Error(`tasks list ${res.status}`)
         const metas = (await res.json()) as TaskMeta[]
-        const finished = metas
-          .filter((m) => TERMINAL.has(m.status))
-          .sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0))
+        const sorted = [...metas].sort(
+          (a, b) => (a.started_at ?? 0) - (b.started_at ?? 0),
+        )
+        const finished = sorted.filter((m) => TERMINAL.has(m.status))
+        // Most-recently started running task. There should be at most
+        // one in flight per session — that's the wrapper contract —
+        // but pick the latest just in case.
+        const runningMeta = [...sorted]
+          .reverse()
+          .find((m) => m.status === "running")
         const all: Event[] = []
         for (const m of finished) {
           const r = await fetch(
@@ -136,6 +147,21 @@ export function ChatView({
         }
         if (!cancelled) {
           setHistoryEvents(all)
+          if (runningMeta) {
+            // Reattach the live poll to the in-flight task. Seed
+            // liveEvents from whatever the wrapper already has so the
+            // user sees what happened before they came back, instead
+            // of waiting for the next event to land.
+            const r = await fetch(
+              `/api/agents/${encodeURIComponent(slug)}/chat/tasks/${encodeURIComponent(runningMeta.task_id)}`,
+              { cache: "no-store" },
+            )
+            if (r.ok) {
+              const task = (await r.json()) as Task
+              setLiveEvents(task.events ?? [])
+            }
+            setTaskId(runningMeta.task_id)
+          }
           setLoaded(true)
         }
       } catch (e) {
