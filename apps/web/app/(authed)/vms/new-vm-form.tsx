@@ -385,7 +385,7 @@ export function NewVmForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">none</SelectItem>
+                  <SelectItem value="none">No access</SelectItem>
                   <SelectItem value="resource-admin">resource-admin</SelectItem>
                   <SelectItem value="cluster-admin">cluster-admin</SelectItem>
                 </SelectContent>
@@ -397,7 +397,7 @@ export function NewVmForm({
               </p>
             )}
             <p className="text-muted-foreground text-xs">
-              <code>none</code> mounts no SA token (kubectl unusable).{" "}
+              <code>No access</code> mounts no SA token (kubectl unusable).{" "}
               <code>resource-admin</code> binds the built-in <code>admin</code>{" "}
               ClusterRole inside <code>resource</code> ns.{" "}
               <code>cluster-admin</code> binds full cluster-admin —
