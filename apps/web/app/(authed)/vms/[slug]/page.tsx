@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 import { fetchVms, type Vm, type VmStatus } from "@/lib/api"
+import { AutoRefresh } from "@/components/auto-refresh"
 import {
   ArrowSquareOut,
   Cube,
@@ -36,9 +37,11 @@ export default async function VmDetailPage({
   if (!vm) notFound()
 
   const isRunning = vm.status === "Running"
+  const pending = vm.status === "Pending" || vm.status === "Unknown"
 
   return (
     <div className="space-y-6">
+      <AutoRefresh pending={pending} />
       <div>
         <Link
           href="/vms"

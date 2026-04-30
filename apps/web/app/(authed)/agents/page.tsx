@@ -53,10 +53,13 @@ export default async function AgentsPage() {
     fetchAgents(cookieHeader),
     fetchAgentModels(),
   ])
+  const pending = (agents ?? []).some(
+    (a) => a.status === "Pending" || a.status === "Unknown",
+  )
 
   return (
     <div className="space-y-6">
-      <AutoRefresh />
+      <AutoRefresh pending={pending} />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Agents</h1>

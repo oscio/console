@@ -112,10 +112,13 @@ export default async function VmsPage() {
     fetchAgentModels(),
   ])
   const freeVolumes = (volumes ?? []).filter((v) => !v.boundTo)
+  const pending = (vms ?? []).some(
+    (v) => v.status === "Pending" || v.status === "Unknown",
+  )
 
   return (
     <div className="space-y-6">
-      <AutoRefresh />
+      <AutoRefresh pending={pending} />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">VMs</h1>

@@ -48,10 +48,16 @@ async function deleteVolumeAction(formData: FormData) {
 export default async function VolumesPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const volumes = await fetchVolumes(cookieHeader)
+  const pending = (volumes ?? []).some(
+    (v) =>
+      v.status === "Pending" ||
+      v.status === "Released" ||
+      v.status === "Unknown",
+  )
 
   return (
     <div className="space-y-6">
-      <AutoRefresh />
+      <AutoRefresh pending={pending} />
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Volumes</h1>

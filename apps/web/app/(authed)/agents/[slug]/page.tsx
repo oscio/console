@@ -32,10 +32,11 @@ export default async function AgentDetailPage({
   if (!agent) notFound()
 
   const isRunning = agent.status === "Running"
+  const pending = agent.status === "Pending" || agent.status === "Unknown"
 
   return (
     <div className="space-y-6">
-      <AutoRefresh />
+      <AutoRefresh pending={pending} />
       <div>
         <Link
           href="/agents"

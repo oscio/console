@@ -9,11 +9,21 @@ import { useRouter } from "next/navigation"
 // route's RSC cache and re-streams new payload — no full-page
 // reload, no client-side state lost.
 //
-// Pauses when the tab is hidden so background tabs don't spam the
-// api.
-export function AutoRefresh({ intervalMs = 5000 }: { intervalMs?: number }) {
+// Pauses when:
+//   * the tab is hidden (so background tabs don't spam the api)
+//   * `pending=false` — nothing is in a transitional state, no
+//     reason to poll. Caller passes `vms.some(v => v.status ===
+//     "Pending")` etc. so a steady-state list/detail goes idle.
+export function AutoRefresh({
+  pending,
+  intervalMs = 5000,
+}: {
+  pending: boolean
+  intervalMs?: number
+}) {
   const router = useRouter()
   useEffect(() => {
+    if (!pending) return
     let id: ReturnType<typeof setInterval> | null = null
     const start = () => {
       if (id) return
@@ -34,6 +44,6 @@ export function AutoRefresh({ intervalMs = 5000 }: { intervalMs?: number }) {
       stop()
       document.removeEventListener("visibilitychange", onVis)
     }
-  }, [router, intervalMs])
+  }, [router, intervalMs, pending])
   return null
 }
