@@ -307,7 +307,7 @@ function EventRow({ ev }: { ev: Event }) {
             {failed ? ` (exit ${ev.exit_code})` : ""}
           </p>
           {output && (
-            <pre className="bg-muted/40 mt-0.5 overflow-x-auto rounded px-2 py-1 font-mono text-xs whitespace-pre-wrap break-words">
+            <pre className="bg-muted dark:bg-muted/40 mt-0.5 overflow-x-auto rounded px-2 py-1 font-mono text-xs whitespace-pre-wrap break-words">
               {output}
             </pre>
           )}
