@@ -1,18 +1,22 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { Button } from "@workspace/ui/components/button"
-import { Input } from "@workspace/ui/components/input"
 
 // Inline rename for any resource — used on detail pages of vms /
 // agents / volumes / loadbalancers. Submits via a server action that
 // the page provides; the slug is fixed and stays in the URL, only
 // the display name changes.
 //
-// Editing toggles between a static label and an input + Save/Cancel.
-// On success the page is refreshed so the title block re-renders
-// with the new name (no client-side state mirror to drift).
+// UX: the name is always rendered as an <input> styled to match the
+// page's h1 — looks like static text by default, hover/focus reveal
+// a thin border so the affordance is "click to edit". No Save /
+// Cancel buttons:
+//   - blur saves (server action) if value is non-empty and changed
+//   - Enter blurs (commits)
+//   - Escape reverts to the last-saved value and blurs
+// Errors flash a small inline message and roll the value back so
+// the next attempt starts clean.
 export function RenameForm({
   initialName,
   action,
@@ -21,76 +25,69 @@ export function RenameForm({
   action: (formData: FormData) => Promise<{ error?: string } | void>
 }) {
   const router = useRouter()
-  const [editing, setEditing] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const [value, setValue] = useState(initialName)
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold">{initialName}</h1>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setValue(initialName)
-            setError(null)
-            setEditing(true)
-          }}
-        >
-          Rename
-        </Button>
-      </div>
-    )
+  // Re-sync when the parent re-renders with a new server-side value
+  // (e.g. after router.refresh() following a successful save).
+  useEffect(() => {
+    setValue(initialName)
+  }, [initialName])
+
+  const commit = (next: string) => {
+    const trimmed = next.trim()
+    if (!trimmed) {
+      setValue(initialName)
+      return
+    }
+    if (trimmed === initialName) return
+    startTransition(async () => {
+      setError(null)
+      const fd = new FormData()
+      fd.set("name", trimmed)
+      const result = await action(fd)
+      if (result && "error" in result && result.error) {
+        setError(result.error)
+        setValue(initialName)
+        return
+      }
+      router.refresh()
+    })
   }
 
   return (
-    <form
-      className="flex items-center gap-2"
-      action={(fd) =>
-        startTransition(async () => {
-          setError(null)
-          const result = await action(fd)
-          if (result?.error) {
-            setError(result.error)
-            return
-          }
-          setEditing(false)
-          router.refresh()
-        })
-      }
-    >
-      <Input
-        name="name"
+    <div className="flex items-center gap-2">
+      <input
+        ref={inputRef}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        maxLength={200}
-        required
-        autoFocus
-        className="text-2xl font-semibold h-auto py-1"
-      />
-      <Button type="submit" size="sm" disabled={pending}>
-        {pending ? "Saving…" : "Save"}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        disabled={pending}
-        onClick={() => {
-          setEditing(false)
-          setError(null)
+        onBlur={() => commit(value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            e.currentTarget.blur()
+          } else if (e.key === "Escape") {
+            setValue(initialName)
+            // setTimeout so the value is in state before blur fires
+            // commit() — otherwise commit reads the un-reverted value.
+            setTimeout(() => e.currentTarget.blur(), 0)
+          }
         }}
-      >
-        Cancel
-      </Button>
+        disabled={pending}
+        maxLength={200}
+        spellCheck={false}
+        // Width grows with content so the border doesn't look short.
+        size={Math.max(value.length, 8)}
+        aria-label="Name"
+        className="text-2xl font-semibold bg-transparent border border-transparent rounded px-1 -mx-1 hover:border-input focus:border-input focus-visible:outline-none focus-visible:ring-0 disabled:opacity-60"
+      />
       {error && (
         <span role="alert" className="text-destructive text-xs">
           {error}
         </span>
       )}
-    </form>
+    </div>
   )
 }
