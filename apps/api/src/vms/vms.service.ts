@@ -191,7 +191,7 @@ export class VmsService {
     let volumeSlug: string | null = null
     if (input.volumeMode === "new") {
       const created = await this.volumes.create(ownerId, {
-        name: input.volumeName?.trim() || `${displayName} volume`,
+        name: input.volumeName?.trim() || displayName,
         sizeGi: input.volumeSizeGi ?? VM_DEFAULTS.volumeSizeGi,
       })
       volumeSlug = created.slug
@@ -453,7 +453,7 @@ export class VmsService {
         )
       }
       await this.loadBalancers.create(ownerId, {
-        name: lb.name?.trim() || `${displayName} :${lb.port}`,
+        name: lb.name?.trim() || displayName,
         vmSlug: slug,
         port: lb.port,
       })
@@ -465,7 +465,7 @@ export class VmsService {
     // this VM (cascade-deleted in vms.service.delete).
     if (wantAgent && volumeSlug && sshKeySecretName) {
       await this.agents.create(ownerId, {
-        name: `${displayName} agent`,
+        name: displayName,
         agentType: input.agentType as Exclude<typeof input.agentType, "none">,
         boundToVm: slug,
         workspaceVolumeSlug: volumeSlug,
