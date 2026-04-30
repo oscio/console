@@ -103,8 +103,8 @@ export const KUBECTL_ACCESS_TIERS: readonly KubectlAccessTier[] = [
 // omits the field. Sized for a 1-user dev workspace; bumpable on the
 // dial.
 export const VM_DEFAULTS = {
-  cpu: "2",
-  memory: "4Gi",
+  cpu: "1",
+  memory: "2Gi",
   volumeSizeGi: 1,
 } as const
 

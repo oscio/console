@@ -28,9 +28,9 @@ import { type AgentModel, DEFAULT_AGENT_MODEL } from "@/lib/agent-models"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
-const CPU = { min: 0.5, max: 8, step: 0.5, recommended: 2 }
-const MEM = { min: 1, max: 16, step: 1, recommended: 4 }
-const VOL = { min: 1, max: 20, step: 1, recommended: 2 }
+const CPU = { min: 0.5, max: 8, step: 0.5, recommended: 1 }
+const MEM = { min: 1, max: 16, step: 1, recommended: 2 }
+const VOL = { min: 1, max: 20, step: 1, recommended: 1 }
 
 type Mode = "new" | "attach" | "none"
 

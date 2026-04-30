@@ -19,7 +19,7 @@ import { Slider } from "@workspace/ui/components/slider"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
-const SIZE = { min: 1, max: 100, step: 0.5, recommended: 1 }
+const SIZE = { min: 1, max: 20, step: 1, recommended: 1 }
 
 export function NewVolumeForm({ action }: { action: Action }) {
   const router = useRouter()
