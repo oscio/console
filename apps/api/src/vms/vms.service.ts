@@ -12,7 +12,7 @@ import { generateAgentKeypair } from "../agents/sshkey"
 import { LoadBalancersService } from "../loadbalancers/loadbalancers.service"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { VolumesService } from "../volumes/volumes.service"
-import { k8sApps, k8sCore, k8sCustom } from "./k8s.client"
+import { k8sApps, k8sCore, k8sCustom, k8sRbac } from "./k8s.client"
 import {
   CreateVmInput,
   Vm,
@@ -241,6 +241,14 @@ export class VmsService {
 
     await this.ensureService(ns, slug, input.imageType)
 
+    // Per-VM ServiceAccount so kubectl-from-the-VM has its own
+    // identity (not the namespace's default SA, which has nothing).
+    // Always-on RoleBinding gives `admin` inside `resource` ns;
+    // opt-in ClusterRoleBinding adds cluster-wide cluster-admin for
+    // `terraform apply` / cross-namespace work. Both are
+    // cascade-deleted in delete().
+    await this.ensureVmServiceAccount(ns, slug, ownerId, !!input.clusterAdmin)
+
     let sshKeySecretName: string | null = null
     if (wantAgent) {
       if (!input.agentType) {
@@ -391,6 +399,7 @@ export class VmsService {
                 },
               },
               spec: ({
+                serviceAccountName: slug,
                 containers,
                 volumes: podVolumes,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -546,6 +555,11 @@ export class VmsService {
     await core
       .deleteNamespacedSecret({ name: `agent-ssh-${cleanSlug}`, namespace: ns })
       .catch(() => undefined)
+    // Per-VM ServiceAccount + (Cluster)RoleBinding teardown — created
+    // by ensureVmServiceAccount at VM-create time. Cluster binding may
+    // not exist (only made when clusterAdmin was opted in); both
+    // deletes swallow 404 so cleanup is idempotent.
+    await this.deleteVmServiceAccount(ns, cleanSlug)
     // LB cleanup: cascade-delete every LB targeting this VM.
     await this.loadBalancers.cascadeDeleteForVm(ownerId, cleanSlug)
     // Tear down per-service HTTPRoutes — term/code always, vnc when present.
@@ -561,6 +575,99 @@ export class VmsService {
     for (const u of owners) {
       await this.fga.revokeVmOwner(cleanSlug, u).catch(() => undefined)
     }
+  }
+
+  // Create the per-VM ServiceAccount + RoleBinding (always) and
+  // ClusterRoleBinding (opt-in). Pod spec sets serviceAccountName=slug
+  // so kubelet projects this SA's token; agent-sandbox's start.sh
+  // turns that token into ~/.kube/config so kubectl Just Works in the
+  // VM. ConflictException is swallowed so re-running create after a
+  // partial failure is idempotent.
+  private async ensureVmServiceAccount(
+    ns: string,
+    slug: string,
+    ownerId: string,
+    clusterAdmin: boolean,
+  ): Promise<void> {
+    const labels = {
+      [VM_LABEL]: VM_LABEL_VALUE,
+      [VM_OWNER_LABEL]: sanitizeLabel(ownerId),
+      "agent-platform/vm-slug": slug,
+    }
+    const core = k8sCore()
+    const rbac = k8sRbac()
+    const swallow409 = (err: { code?: number; statusCode?: number }) => {
+      if ((err.code ?? err.statusCode) === 409) return
+      throw err
+    }
+    await core
+      .createNamespacedServiceAccount({
+        namespace: ns,
+        body: {
+          apiVersion: "v1",
+          kind: "ServiceAccount",
+          metadata: { name: slug, namespace: ns, labels },
+        },
+      })
+      .catch(swallow409)
+    // Namespace-scoped admin so the user can manage their own VMs /
+    // agents / LBs / volumes via kubectl. `admin` ClusterRole is the
+    // canonical "do anything in this namespace" role.
+    await rbac
+      .createNamespacedRoleBinding({
+        namespace: ns,
+        body: {
+          apiVersion: "rbac.authorization.k8s.io/v1",
+          kind: "RoleBinding",
+          metadata: { name: slug, namespace: ns, labels },
+          subjects: [{ kind: "ServiceAccount", name: slug, namespace: ns }],
+          roleRef: {
+            apiGroup: "rbac.authorization.k8s.io",
+            kind: "ClusterRole",
+            name: "admin",
+          },
+        },
+      })
+      .catch(swallow409)
+    if (clusterAdmin) {
+      // Cluster-wide cluster-admin. Lives outside any namespace, so
+      // we encode the VM identity in the binding name (vm-<slug>) for
+      // cleanup. Same labels make orphan-finding easy.
+      await rbac
+        .createClusterRoleBinding({
+          body: {
+            apiVersion: "rbac.authorization.k8s.io/v1",
+            kind: "ClusterRoleBinding",
+            metadata: { name: `vm-${slug}`, labels },
+            subjects: [
+              { kind: "ServiceAccount", name: slug, namespace: ns },
+            ],
+            roleRef: {
+              apiGroup: "rbac.authorization.k8s.io",
+              kind: "ClusterRole",
+              name: "cluster-admin",
+            },
+          },
+        })
+        .catch(swallow409)
+    }
+  }
+
+  // Counterpart to ensureVmServiceAccount — runs in delete(). Each
+  // delete is best-effort; missing resources (e.g. ClusterRoleBinding
+  // when clusterAdmin was off) just no-op.
+  private async deleteVmServiceAccount(ns: string, slug: string): Promise<void> {
+    const core = k8sCore()
+    const rbac = k8sRbac()
+    await rbac
+      .deleteClusterRoleBinding({ name: `vm-${slug}` })
+      .catch(() => undefined)
+    await rbac
+      .deleteNamespacedRoleBinding({ name: slug, namespace: ns })
+      .catch(() => undefined)
+    await core
+      .deleteNamespacedServiceAccount({ name: slug, namespace: ns })
+      .catch(() => undefined)
   }
 
   // One HTTPRoute per service hostname, e.g. <slug>-term.vm.<domain>

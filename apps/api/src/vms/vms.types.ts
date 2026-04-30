@@ -71,6 +71,13 @@ export type CreateVmInput = {
     name?: string
     port: number
   }>
+
+  // When true, the VM gets a ClusterRoleBinding to `cluster-admin` in
+  // addition to the default per-VM ServiceAccount + namespace-admin
+  // RoleBinding. Useful when the user wants `terraform apply` /
+  // platform-wide kubectl from inside the workspace; not the default
+  // because the binding survives until VM delete.
+  clusterAdmin?: boolean
 }
 
 // Defaults shown in the UI as "Recommended" + applied when caller

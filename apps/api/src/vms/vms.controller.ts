@@ -146,6 +146,7 @@ export class VmsController {
       volumeSlug: body.volumeSlug,
       loadBalancers,
       agentModel,
+      clusterAdmin: !!body.clusterAdmin,
     })
   }
 

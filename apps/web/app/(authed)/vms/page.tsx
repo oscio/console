@@ -68,6 +68,7 @@ async function createVmAction(formData: FormData) {
     agentType === "zeroclaw" && agentModelRaw.length > 0
       ? agentModelRaw
       : undefined
+  const clusterAdmin = formData.get("clusterAdmin") === "true"
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -82,6 +83,7 @@ async function createVmAction(formData: FormData) {
       volumeSlug,
       loadBalancers: loadBalancers.length ? loadBalancers : undefined,
       agentModel,
+      clusterAdmin,
     })
   } catch (err) {
     return { error: (err as Error).message }

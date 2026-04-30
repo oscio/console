@@ -3,6 +3,7 @@ import {
   CoreV1Api,
   CustomObjectsApi,
   KubeConfig,
+  RbacAuthorizationV1Api,
 } from "@kubernetes/client-node"
 
 // Reused across the api process. In-cluster: ServiceAccount token via
@@ -25,3 +26,5 @@ export const k8sCore = (): CoreV1Api => getKubeConfig().makeApiClient(CoreV1Api)
 export const k8sApps = (): AppsV1Api => getKubeConfig().makeApiClient(AppsV1Api)
 export const k8sCustom = (): CustomObjectsApi =>
   getKubeConfig().makeApiClient(CustomObjectsApi)
+export const k8sRbac = (): RbacAuthorizationV1Api =>
+  getKubeConfig().makeApiClient(RbacAuthorizationV1Api)

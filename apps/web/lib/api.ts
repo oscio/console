@@ -145,6 +145,9 @@ export async function createVm(
     }>
     // OpenRouter model id for the attached agent (zeroclaw only).
     agentModel?: string
+    // When true, the VM gets a cluster-admin ClusterRoleBinding
+    // (in addition to the default namespace-admin RoleBinding).
+    clusterAdmin?: boolean
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {

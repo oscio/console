@@ -72,6 +72,12 @@ export function NewVmForm({
     DEFAULT_AGENT_MODEL
   const [agentModel, setAgentModel] = useState<string>(initialAgentModel)
 
+  // Cluster-admin opt-in. Off by default; the api always grants
+  // namespace-admin in `resource` ns so kubectl works for own-VM
+  // operations regardless. cluster-admin is the extra-broad grant
+  // for terraform-apply / cross-namespace work.
+  const [clusterAdmin, setClusterAdmin] = useState(false)
+
   // Multiple LBs per VM. Each item becomes one ClusterIP Service +
   // HTTPRoute pair on the api side. `key` is React-only — stripped
   // before encoding into the hidden `loadBalancers` field.
@@ -352,6 +358,32 @@ export function NewVmForm({
                 )}
               </>
             )}
+          </div>
+
+          {/* Per-VM ServiceAccount + namespace-admin RoleBinding are
+              always created (so kubectl works out of the box for own-VM
+              operations). Cluster-admin is opt-in for terraform-apply /
+              cross-namespace work. */}
+          <div className="space-y-1.5">
+            <Label>kubectl access</Label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="clusterAdmin"
+                value="true"
+                checked={clusterAdmin}
+                onChange={(e) => setClusterAdmin(e.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                Grant cluster-admin
+                <span className="text-muted-foreground ml-2 text-xs">
+                  Default: namespace-admin in <code>resource</code>.
+                  Tick to also bind cluster-admin (full cluster access
+                  for <code>terraform apply</code> / cross-namespace).
+                </span>
+              </span>
+            </label>
           </div>
 
           {/* Load Balancers (optional, default empty). Each row becomes
