@@ -4,6 +4,15 @@ import { useEffect, useRef, useState, useTransition } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { CopyableId } from "@/components/copyable-id"
 
+// Strip ANSI escape sequences (CSI + a few common alts). Tool output
+// from shell commands routinely includes color/cursor codes that
+// render as `[31m`-style garbage in <pre>. Stripping is the cheapest
+// path to readable output; full color rendering would need a lib.
+const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "")
+}
+
 // Minimal chat surface. Each prompt → POST /tasks → poll GET /tasks/<id>
 // until terminal state. Events are appended to the on-screen log as
 // they show up. No streaming yet — polling keeps the contract simple
@@ -270,15 +279,24 @@ function EventRow({ ev }: { ev: Event }) {
           <span className="opacity-70">{JSON.stringify(ev.input)}</span>
         </p>
       )
-    case "tool.result":
+    case "tool.result": {
+      const output = stripAnsi(String(ev.output ?? ""))
+      const failed =
+        typeof ev.exit_code === "number" && ev.exit_code !== 0
       return (
-        <p className="text-muted-foreground text-xs">
-          ← {String(ev.name ?? "?")}: {String(ev.output ?? "").slice(0, 200)}
-          {typeof ev.exit_code === "number" && ev.exit_code !== 0
-            ? ` (exit ${ev.exit_code})`
-            : ""}
-        </p>
+        <div className="my-1">
+          <p className="text-muted-foreground text-xs">
+            ← {String(ev.name ?? "?")}
+            {failed ? ` (exit ${ev.exit_code})` : ""}
+          </p>
+          {output && (
+            <pre className="bg-muted/40 mt-0.5 overflow-x-auto rounded px-2 py-1 font-mono text-xs whitespace-pre-wrap break-words">
+              {output}
+            </pre>
+          )}
+        </div>
       )
+    }
     case "task.done":
       // Silenced — message stream halt is itself the end-of-turn
       // signal. The event still lands in events.jsonl for debugging.
