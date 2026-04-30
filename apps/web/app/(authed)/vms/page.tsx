@@ -24,6 +24,7 @@ import {
 } from "@/lib/api"
 import { fetchAgentModels } from "@/lib/agent-models"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import { DeleteVmButton, NewVmForm } from "./new-vm-form"
 
 async function createVmAction(formData: FormData) {
@@ -178,7 +179,7 @@ export default async function VmsPage() {
                     <StatusBadge status={vm.status} />
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
-                    {new Date(vm.createdAt).toLocaleString()}
+                    <LocalTime iso={vm.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">

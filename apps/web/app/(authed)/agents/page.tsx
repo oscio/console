@@ -20,6 +20,7 @@ import {
 } from "@/lib/api"
 import { fetchAgentModels } from "@/lib/agent-models"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import { DeleteAgentButton, NewAgentForm } from "./new-agent-form"
 
 async function createAgentAction(formData: FormData) {
@@ -124,7 +125,7 @@ export default async function AgentsPage() {
                     <StatusBadge status={agent.status} />
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
-                    {new Date(agent.createdAt).toLocaleString()}
+                    <LocalTime iso={agent.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">

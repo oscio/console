@@ -11,6 +11,7 @@ import {
   type LoadBalancerStatus,
 } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import { RenameForm } from "@/components/rename-form"
 import { ArrowSquareOut } from "@phosphor-icons/react/dist/ssr"
 
@@ -123,7 +124,7 @@ function Details({ lb }: { lb: LoadBalancer }) {
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{lb.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
-      <dd>{new Date(lb.createdAt).toLocaleString()}</dd>
+      <dd><LocalTime iso={lb.createdAt} /></dd>
     </dl>
   )
 }

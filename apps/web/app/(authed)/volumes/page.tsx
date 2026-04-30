@@ -17,6 +17,7 @@ import {
   type VolumeStatus,
 } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import { DeleteVolumeButton, NewVolumeForm } from "./new-volume-form"
 
 async function createVolumeAction(formData: FormData) {
@@ -120,7 +121,7 @@ export default async function VolumesPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
-                    {new Date(v.createdAt).toLocaleString()}
+                    <LocalTime iso={v.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     <DeleteVolumeButton

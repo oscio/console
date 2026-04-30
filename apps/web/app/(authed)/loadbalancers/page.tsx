@@ -18,6 +18,7 @@ import {
   type LoadBalancerStatus,
 } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import {
   DeleteLoadBalancerButton,
   NewLoadBalancerForm,
@@ -137,7 +138,7 @@ export default async function LoadBalancersPage() {
                     <StatusBadge status={lb.status} />
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
-                    {new Date(lb.createdAt).toLocaleString()}
+                    <LocalTime iso={lb.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
                     <DeleteLoadBalancerButton

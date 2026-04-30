@@ -12,6 +12,7 @@ import {
 } from "@workspace/ui/components/card"
 import { fetchVms, renameVm, type Vm, type VmStatus } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import { RenameForm } from "@/components/rename-form"
 import {
   ArrowSquareOut,
@@ -138,7 +139,7 @@ function Details({ vm }: { vm: Vm }) {
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{vm.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
-      <dd>{new Date(vm.createdAt).toLocaleString()}</dd>
+      <dd><LocalTime iso={vm.createdAt} /></dd>
     </dl>
   )
 }

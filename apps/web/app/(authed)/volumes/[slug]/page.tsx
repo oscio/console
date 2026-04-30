@@ -11,6 +11,7 @@ import {
   type VolumeStatus,
 } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { LocalTime } from "@/components/local-time"
 import { RenameForm } from "@/components/rename-form"
 
 export default async function VolumeDetailPage({
@@ -106,7 +107,7 @@ function Details({ volume }: { volume: Volume }) {
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{volume.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
-      <dd>{new Date(volume.createdAt).toLocaleString()}</dd>
+      <dd><LocalTime iso={volume.createdAt} /></dd>
     </dl>
   )
 }
