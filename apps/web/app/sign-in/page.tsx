@@ -23,7 +23,7 @@ export default function SignInPage() {
 
   return (
     <div className="bg-background flex min-h-svh items-center justify-center p-4">
-      <div className="bg-card text-card-foreground grid w-full max-w-2xl overflow-hidden border sm:grid-cols-[1fr_1.5fr]">
+      <div className="bg-card text-card-foreground animate-in fade-in zoom-in-95 grid w-full max-w-2xl overflow-hidden border duration-300 sm:grid-cols-[1fr_1.5fr]">
         {/* Branding panel — dark in both themes. Single piece of
             copy: the "Console" wordmark, top-left. */}
         <div
