@@ -121,23 +121,18 @@ export function NewAgentForm({ action }: { action: Action }) {
             </Select>
           </Field>
 
+          <input type="hidden" name="env" value={envPayload} />
           {fields.length > 0 && (
-            <div className="space-y-3">
-              <div>
-                <Label>Environment</Label>
-                <p className="text-muted-foreground text-xs">
-                  Stored in a per-agent k8s Secret and injected into the
-                  agent container via <code>envFrom</code>.
-                </p>
-              </div>
-              <input type="hidden" name="env" value={envPayload} />
+            <div className="space-y-3 border p-3">
+              <p className="text-xs font-medium">Environment</p>
               {fields.map((f) => (
-                <Field
-                  key={f.name}
-                  id={`agent-env-${f.name}`}
-                  label={f.label}
-                  hint={f.hint}
-                >
+                <div key={f.name} className="space-y-1.5">
+                  <Label
+                    htmlFor={`agent-env-${f.name}`}
+                    className="text-xs"
+                  >
+                    {f.label}
+                  </Label>
                   <Input
                     id={`agent-env-${f.name}`}
                     type={f.secret ? "password" : "text"}
@@ -151,7 +146,12 @@ export function NewAgentForm({ action }: { action: Action }) {
                     }
                     placeholder={f.name}
                   />
-                </Field>
+                  {f.hint && (
+                    <p className="text-muted-foreground text-xs">
+                      {f.hint}
+                    </p>
+                  )}
+                </div>
               ))}
             </div>
           )}
