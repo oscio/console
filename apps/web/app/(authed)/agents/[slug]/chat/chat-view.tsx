@@ -3,6 +3,23 @@
 import { useEffect, useRef, useState, useTransition } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { CopyableId } from "@/components/copyable-id"
+import { renderMarkdownAsCli } from "@/lib/cli-markdown"
+
+// Render assistant markdown as CLI-style text (Unicode box tables,
+// `# heading` prefixes, `•` bullets, indented code). Pure browser-
+// safe: just `marked.lexer` + a small token walker, no Node deps.
+// Crashes fall back to the original markdown so the chat never
+// goes blank.
+function safeRenderAssistant(md: string): string {
+  try {
+    return renderMarkdownAsCli(md)
+  } catch (e) {
+    if (typeof console !== "undefined") {
+      console.error("cli-markdown render failed", e)
+    }
+    return md
+  }
+}
 
 // Strip ANSI escape sequences (CSI + a few common alts). Tool output
 // from shell commands routinely includes color/cursor codes that
@@ -296,7 +313,7 @@ function EventRow({ ev }: { ev: Event }) {
             {role}
           </span>
           <pre className="font-mono text-sm whitespace-pre-wrap break-words">
-            {content}
+            {role === "assistant" ? safeRenderAssistant(content) : content}
           </pre>
         </div>
       )
