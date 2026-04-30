@@ -298,9 +298,11 @@ function EventRow({ ev }: { ev: Event }) {
       )
     }
     case "task.done":
-      // Silenced — message stream halt is itself the end-of-turn
-      // signal. The event still lands in events.jsonl for debugging.
-      return null
+      return (
+        <p className="text-muted-foreground/60 text-xs">
+          task <CopyableId id={String(ev.task_id ?? "")} /> done
+        </p>
+      )
     case "task.error":
       return (
         <p className="text-destructive text-xs">
