@@ -42,7 +42,6 @@ async function createVmAction(formData: FormData) {
   let loadBalancers: Array<{
     name?: string
     port: number
-    persistOnVmDelete?: boolean
   }> = []
   try {
     const parsed = JSON.parse(lbsRaw) as unknown
@@ -58,7 +57,6 @@ async function createVmAction(formData: FormData) {
             ? obj.name.trim()
             : undefined,
           port,
-          persistOnVmDelete: !!obj.persistOnVmDelete,
         })
       }
     }

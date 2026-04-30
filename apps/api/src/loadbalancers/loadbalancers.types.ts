@@ -29,9 +29,6 @@ export type CreateLoadBalancerInput = {
   name: string
   vmSlug: string
   port: number
-  // When true, surviving VM-delete becomes opt-in: VM cleanup
-  // skips LBs annotated `lb-persist-on-vm-delete=true`.
-  persistOnVmDelete?: boolean
 }
 
 export const LB_LABEL = "agent-platform/component"
@@ -40,5 +37,3 @@ export const LB_OWNER_LABEL = "agent-platform/lb-owner"
 export const LB_VM_LABEL = "agent-platform/lb-vm"
 export const LB_PORT_ANNOTATION = "agent-platform/lb-port"
 export const LB_DISPLAY_NAME_ANNOTATION = "agent-platform/lb-display-name"
-export const LB_PERSIST_ON_VM_DELETE_ANNOTATION =
-  "agent-platform/lb-persist-on-vm-delete"

@@ -116,7 +116,6 @@ export class VmsController {
           return {
             name: typeof item.name === "string" ? item.name : undefined,
             port: Number(item.port),
-            persistOnVmDelete: !!item.persistOnVmDelete,
           }
         })
       : undefined

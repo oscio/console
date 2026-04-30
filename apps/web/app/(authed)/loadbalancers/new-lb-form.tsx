@@ -38,7 +38,6 @@ export function NewLoadBalancerForm({
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [vmSlug, setVmSlug] = useState(vms[0]?.slug ?? "")
-  const [persist, setPersist] = useState(false)
 
   const noVms = vms.length === 0
 
@@ -125,24 +124,6 @@ export function NewLoadBalancerForm({
               5000, 8000, 8888.
             </p>
           </div>
-
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              name="persistOnVmDelete"
-              value="true"
-              checked={persist}
-              onChange={(e) => setPersist(e.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              Persist on VM delete
-              <span className="text-muted-foreground ml-2 text-xs">
-                Default: cascade-delete with target VM. Persisted LBs stay
-                here even after the VM is gone.
-              </span>
-            </span>
-          </label>
 
           {error && (
             <p

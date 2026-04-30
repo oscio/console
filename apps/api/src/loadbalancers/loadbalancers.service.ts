@@ -17,7 +17,6 @@ import {
   LB_LABEL,
   LB_LABEL_VALUE,
   LB_OWNER_LABEL,
-  LB_PERSIST_ON_VM_DELETE_ANNOTATION,
   LB_PORT_ANNOTATION,
   LB_VM_LABEL,
 } from "./loadbalancers.types"
@@ -146,8 +145,6 @@ export class LoadBalancersService {
             annotations: {
               [LB_PORT_ANNOTATION]: String(input.port),
               [LB_DISPLAY_NAME_ANNOTATION]: displayName,
-              [LB_PERSIST_ON_VM_DELETE_ANNOTATION]:
-                input.persistOnVmDelete ? "true" : "false",
             },
           },
           spec: {
@@ -189,8 +186,6 @@ export class LoadBalancersService {
             annotations: {
               [LB_PORT_ANNOTATION]: String(input.port),
               [LB_DISPLAY_NAME_ANNOTATION]: displayName,
-              [LB_PERSIST_ON_VM_DELETE_ANNOTATION]:
-                input.persistOnVmDelete ? "true" : "false",
             },
           },
           spec: {
@@ -276,9 +271,6 @@ export class LoadBalancersService {
       })
       .catch(() => ({ items: [] }))) as { items?: HttpRouteShape[] }
     for (const r of res.items ?? []) {
-      const persist =
-        r.metadata?.annotations?.[LB_PERSIST_ON_VM_DELETE_ANNOTATION] === "true"
-      if (persist) continue
       const slug = r.metadata?.name
       if (!slug) continue
       await this.delete(ownerId, slug).catch(() => undefined)

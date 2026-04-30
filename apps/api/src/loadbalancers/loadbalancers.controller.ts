@@ -42,7 +42,6 @@ export class LoadBalancersController {
       name,
       vmSlug,
       port,
-      persistOnVmDelete: !!body.persistOnVmDelete,
     })
   }
 

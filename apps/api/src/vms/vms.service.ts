@@ -438,7 +438,6 @@ export class VmsService {
         name: lb.name?.trim() || `${displayName} :${lb.port}`,
         vmSlug: slug,
         port: lb.port,
-        persistOnVmDelete: !!lb.persistOnVmDelete,
       })
     }
 
@@ -547,9 +546,7 @@ export class VmsService {
     await core
       .deleteNamespacedSecret({ name: `agent-ssh-${cleanSlug}`, namespace: ns })
       .catch(() => undefined)
-    // LB cleanup: cascade-delete every LB targeting this VM that
-    // wasn't created with `persistOnVmDelete`. Persisted LBs stay
-    // on /loadbalancers (they'll go Pending until re-pointed).
+    // LB cleanup: cascade-delete every LB targeting this VM.
     await this.loadBalancers.cascadeDeleteForVm(ownerId, cleanSlug)
     // Tear down per-service HTTPRoutes — term/code always, vnc when present.
     for (const svc of ["term", "code", "vnc"]) {

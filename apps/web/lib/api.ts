@@ -142,7 +142,6 @@ export async function createVm(
     loadBalancers?: Array<{
       name?: string
       port: number
-      persistOnVmDelete?: boolean
     }>
     // OpenRouter model id for the attached agent (zeroclaw only).
     agentModel?: string
@@ -489,7 +488,6 @@ export async function createLoadBalancer(
     name: string
     vmSlug: string
     port: number
-    persistOnVmDelete?: boolean
   },
 ): Promise<LoadBalancer> {
   const res = await fetch(`${API_URL}/loadbalancers`, {

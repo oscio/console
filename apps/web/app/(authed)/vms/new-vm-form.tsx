@@ -79,7 +79,6 @@ export function NewVmForm({
     key: string
     name: string
     port: number
-    persistOnVmDelete: boolean
   }
   const [lbs, setLbs] = useState<LbDraft[]>([])
   const addLb = () =>
@@ -92,7 +91,6 @@ export function NewVmForm({
             : `${Date.now()}-${Math.random()}`,
         name: "",
         port: 3000,
-        persistOnVmDelete: false,
       },
     ])
   const removeLb = (key: string) =>
@@ -102,10 +100,9 @@ export function NewVmForm({
       prev.map((l) => (l.key === key ? { ...l, ...patch } : l)),
     )
   const lbsPayload = JSON.stringify(
-    lbs.map(({ name, port, persistOnVmDelete }) => ({
+    lbs.map(({ name, port }) => ({
       name: name.trim() || undefined,
       port,
-      persistOnVmDelete,
     })),
   )
 
@@ -428,24 +425,6 @@ export function NewVmForm({
                     }
                   />
                 </div>
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={lb.persistOnVmDelete}
-                    onChange={(e) =>
-                      updateLb(lb.key, { persistOnVmDelete: e.target.checked })
-                    }
-                    className="mt-1"
-                  />
-                  <span>
-                    Persist on VM delete
-                    <span className="text-muted-foreground ml-2 text-xs">
-                      Default: cascade-delete with VM. Persisted LBs stay
-                      under <code>/loadbalancers</code> (Pending until
-                      re-pointed).
-                    </span>
-                  </span>
-                </label>
               </div>
             ))}
           </div>

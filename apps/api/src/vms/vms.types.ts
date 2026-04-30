@@ -70,9 +70,6 @@ export type CreateVmInput = {
     // Display name. Falls back to "<vm-name> :<port>" on the api when blank.
     name?: string
     port: number
-    // When true the LB outlives the VM and shows up under
-    // /loadbalancers (Pending until re-pointed). Default: cascade-delete.
-    persistOnVmDelete?: boolean
   }>
 }
 
