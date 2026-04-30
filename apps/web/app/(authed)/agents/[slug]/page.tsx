@@ -11,7 +11,7 @@ import {
 } from "@workspace/ui/components/card"
 import { fetchAgents, type Agent, type AgentStatus } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
-import { ChatCircle, Cube } from "@phosphor-icons/react/dist/ssr"
+import { ChatCircle } from "@phosphor-icons/react/dist/ssr"
 
 export default async function AgentDetailPage({
   params,
@@ -76,15 +76,6 @@ export default async function AgentDetailPage({
             title="Chat"
             blurb={`Talk to the ${agent.agentType} agent. Sessions persist on the workspace volume.`}
           />
-          {agent.boundToVm && (
-            <NavCard
-              href={`/vms/${agent.boundToVm}`}
-              disabled={false}
-              icon={<Cube weight="duotone" className="size-5" />}
-              title="Open VM"
-              blurb={`Workspace this sidecar is attached to (${agent.boundToVm}).`}
-            />
-          )}
         </div>
       </section>
 
