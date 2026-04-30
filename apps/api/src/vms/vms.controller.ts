@@ -8,6 +8,7 @@ import {
   Headers,
   HttpCode,
   Param,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -191,6 +192,17 @@ export class VmsController {
     @CurrentSession() session: AppSession,
   ) {
     await this.vms.delete(session.user.id, slug)
+  }
+
+  // Rename: only the display name moves. Slug is immutable.
+  @Patch(":slug")
+  async rename(
+    @Param("slug") slug: string,
+    @Body() body: { name?: string },
+    @CurrentSession() session: AppSession,
+  ) {
+    await this.vms.rename(session.user.id, slug, body.name ?? "")
+    return { ok: true }
   }
 }
 

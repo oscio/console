@@ -6,6 +6,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from "@nestjs/common"
@@ -46,5 +47,15 @@ export class VolumesController {
     @CurrentSession() session: AppSession,
   ) {
     await this.volumes.delete(session.user.id, slug)
+  }
+
+  @Patch(":slug")
+  async rename(
+    @Param("slug") slug: string,
+    @Body() body: { name?: string },
+    @CurrentSession() session: AppSession,
+  ) {
+    await this.volumes.rename(session.user.id, slug, body.name ?? "")
+    return { ok: true }
   }
 }

@@ -103,7 +103,14 @@ export default async function LoadBalancersPage() {
             <TableBody>
               {lbs.map((lb) => (
                 <TableRow key={lb.id}>
-                  <TableCell>{lb.name}</TableCell>
+                  <TableCell>
+                    <Link
+                      href={`/loadbalancers/${lb.slug}`}
+                      className="hover:underline"
+                    >
+                      {lb.name}
+                    </Link>
+                  </TableCell>
                   <TableCell className="text-muted-foreground font-mono text-xs">
                     {lb.slug}
                   </TableCell>

@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
@@ -9,8 +10,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { fetchVms, type Vm, type VmStatus } from "@/lib/api"
+import { fetchVms, renameVm, type Vm, type VmStatus } from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { RenameForm } from "@/components/rename-form"
 import {
   ArrowSquareOut,
   Cube,
@@ -39,6 +41,20 @@ export default async function VmDetailPage({
   const isRunning = vm.status === "Running"
   const pending = vm.status === "Pending" || vm.status === "Unknown"
 
+  async function renameAction(formData: FormData) {
+    "use server"
+    const newName = String(formData.get("name") ?? "").trim()
+    if (!newName) return { error: "name is required" }
+    const cookieHeader = (await headers()).get("cookie") ?? ""
+    try {
+      await renameVm(cookieHeader, slug, newName)
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+    revalidatePath(`/vms/${slug}`)
+    revalidatePath("/vms")
+  }
+
   return (
     <div className="space-y-6">
       <AutoRefresh pending={pending} />
@@ -50,7 +66,7 @@ export default async function VmDetailPage({
           ← Back to VMs
         </Link>
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">{vm.name}</h1>
+          <RenameForm initialName={vm.name} action={renameAction} />
           <StatusBadge status={vm.status} />
         </div>
         <p className="text-muted-foreground font-mono text-xs">{vm.slug}</p>
@@ -115,10 +131,8 @@ function Details({ vm }: { vm: Vm }) {
       <dd>
         <StatusBadge status={vm.status} />
       </dd>
-      <dt className="text-muted-foreground">Hostname</dt>
-      <dd className="font-mono text-xs">{vm.hostname}</dd>
       <dt className="text-muted-foreground">Namespace</dt>
-      <dd className="font-mono text-xs">{vm.namespace}</dd>
+      <dd className="font-mono">{vm.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
       <dd>{new Date(vm.createdAt).toLocaleString()}</dd>
     </dl>

@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
@@ -9,8 +10,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { fetchAgents, type Agent, type AgentStatus } from "@/lib/api"
+import {
+  fetchAgents,
+  renameAgent,
+  type Agent,
+  type AgentStatus,
+} from "@/lib/api"
 import { AutoRefresh } from "@/components/auto-refresh"
+import { RenameForm } from "@/components/rename-form"
 import { ChatCircle } from "@phosphor-icons/react/dist/ssr"
 
 export default async function AgentDetailPage({
@@ -34,6 +41,20 @@ export default async function AgentDetailPage({
   const isRunning = agent.status === "Running"
   const pending = agent.status === "Pending" || agent.status === "Unknown"
 
+  async function renameAction(formData: FormData) {
+    "use server"
+    const newName = String(formData.get("name") ?? "").trim()
+    if (!newName) return { error: "name is required" }
+    const cookieHeader = (await headers()).get("cookie") ?? ""
+    try {
+      await renameAgent(cookieHeader, slug, newName)
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+    revalidatePath(`/agents/${slug}`)
+    revalidatePath("/agents")
+  }
+
   return (
     <div className="space-y-6">
       <AutoRefresh pending={pending} />
@@ -45,7 +66,7 @@ export default async function AgentDetailPage({
           ← Back to Agents
         </Link>
         <div className="mt-2 flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">{agent.name}</h1>
+          <RenameForm initialName={agent.name} action={renameAction} />
           <StatusBadge status={agent.status} />
         </div>
         <p className="text-muted-foreground font-mono text-xs">{agent.slug}</p>
@@ -100,7 +121,7 @@ function Details({ agent }: { agent: Agent }) {
           <dd>
             <Link
               href={`/vms/${agent.boundToVm}`}
-              className="font-mono text-xs hover:underline"
+              className="font-mono hover:underline"
             >
               {agent.boundToVm}
             </Link>
@@ -109,11 +130,11 @@ function Details({ agent }: { agent: Agent }) {
       ) : (
         <>
           <dt className="text-muted-foreground">Hostname</dt>
-          <dd className="font-mono text-xs">{agent.hostname}</dd>
+          <dd className="font-mono">{agent.hostname}</dd>
         </>
       )}
       <dt className="text-muted-foreground">Namespace</dt>
-      <dd className="font-mono text-xs">{agent.namespace}</dd>
+      <dd className="font-mono">{agent.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
       <dd>{new Date(agent.createdAt).toLocaleString()}</dd>
     </dl>

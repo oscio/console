@@ -90,7 +90,14 @@ export default async function VolumesPage() {
             <TableBody>
               {volumes.map((v) => (
                 <TableRow key={v.id}>
-                  <TableCell>{v.name}</TableCell>
+                  <TableCell>
+                    <Link
+                      href={`/volumes/${v.slug}`}
+                      className="hover:underline"
+                    >
+                      {v.name}
+                    </Link>
+                  </TableCell>
                   <TableCell className="text-muted-foreground font-mono text-xs">
                     {v.slug}
                   </TableCell>

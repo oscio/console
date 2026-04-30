@@ -25,6 +25,10 @@ import {
   GLOBAL_AGENT_ENV_SECRET,
 } from "./agents.types"
 
+function jsonPointerLabel(label: string): string {
+  return `/${label.replace(/~/g, "~0").replace(/\//g, "~1")}`
+}
+
 function sanitizeLabel(value: string): string {
   return value
     .toLowerCase()
@@ -426,6 +430,32 @@ export class AgentsService {
     const userId = rows[0]?.id
     if (!userId) return false
     return this.fga.canAccessAgent(userId, cleanSlug)
+  }
+
+  // Update the agent's display name. Slug is immutable; only the
+  // StatefulSet annotation moves. FGA-gated.
+  async rename(ownerId: string, slug: string, newName: string): Promise<void> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug) throw new BadRequestException("Invalid agent slug.")
+    const trimmed = newName.trim()
+    if (!trimmed) throw new BadRequestException("name is required")
+    if (trimmed.length > 200) {
+      throw new BadRequestException("name must be 200 characters or fewer")
+    }
+    const allowed = await this.fga.canAccessAgent(ownerId, cleanSlug)
+    if (!allowed) {
+      throw new NotFoundException(`Agent "${cleanSlug}" not found.`)
+    }
+    const path = jsonPointerLabel(AGENT_DISPLAY_NAME_ANNOTATION)
+    await k8sApps()
+      .patchNamespacedStatefulSet({
+        name: cleanSlug,
+        namespace: RESOURCE_NS,
+        body: [
+          { op: "add", path: `/metadata/annotations${path}`, value: trimmed },
+        ] as unknown as object,
+      })
+      .catch((err) => rethrowK8sError(err, `Failed to rename agent "${cleanSlug}"`))
   }
 
   async delete(ownerId: string, slug: string): Promise<void> {

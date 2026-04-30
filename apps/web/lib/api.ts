@@ -182,6 +182,24 @@ export async function deleteVm(
   }
 }
 
+// Rename a VM by patching its display-name annotation. Slug stays.
+export async function renameVm(
+  cookieHeader: string,
+  slug: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/vms/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`vms rename failed: ${res.status} ${text}`)
+  }
+}
+
 export type AgentType = "hermes" | "zeroclaw"
 export type AgentStatus = VmStatus
 
@@ -250,6 +268,23 @@ export async function deleteAgent(
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => "")
     throw new Error(`agents delete failed: ${res.status} ${text}`)
+  }
+}
+
+export async function renameAgent(
+  cookieHeader: string,
+  slug: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`agents rename failed: ${res.status} ${text}`)
   }
 }
 
@@ -457,6 +492,23 @@ export async function deleteVolume(
   }
 }
 
+export async function renameVolume(
+  cookieHeader: string,
+  slug: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/volumes/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`volumes rename failed: ${res.status} ${text}`)
+  }
+}
+
 export type LoadBalancerStatus = "Ready" | "Pending" | "Unknown"
 
 export type LoadBalancer = {
@@ -520,6 +572,26 @@ export async function deleteLoadBalancer(
   if (!res.ok && res.status !== 404) {
     const text = await res.text().catch(() => "")
     throw new Error(`loadbalancers delete failed: ${res.status} ${text}`)
+  }
+}
+
+export async function renameLoadBalancer(
+  cookieHeader: string,
+  slug: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/loadbalancers/${encodeURIComponent(slug)}`,
+    {
+      method: "PATCH",
+      headers: { cookie: cookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`loadbalancers rename failed: ${res.status} ${text}`)
   }
 }
 

@@ -49,6 +49,13 @@ function sanitizeLabel(value: string): string {
     .slice(0, 63)
 }
 
+// JSON Pointer encoding for label/annotation keys. Slash → ~1,
+// tilde → ~0 (RFC 6901). Used when building JSON Patch ops that
+// touch labels or annotations whose keys contain `/`.
+function jsonPointerLabel(label: string): string {
+  return `/${label.replace(/~/g, "~0").replace(/\//g, "~1")}`
+}
+
 // Random slug used as the K8s resource name + hostname. Always
 // DNS-1035-valid: starts with a letter, lowercase alnum, length 11.
 function randomSlug(): string {
@@ -485,6 +492,31 @@ export class VmsService {
   }
 
   // Used by the ForwardAuth endpoint /vms/auth. Accepts the email that
+  // Update the VM's display name. The slug is immutable (it's the
+  // K8s resource name); only the annotation on the StatefulSet moves.
+  // FGA-gated.
+  async rename(ownerId: string, slug: string, newName: string): Promise<void> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug) throw new BadRequestException("Invalid VM slug.")
+    const trimmed = newName.trim()
+    if (!trimmed) throw new BadRequestException("name is required")
+    if (trimmed.length > 200) {
+      throw new BadRequestException("name must be 200 characters or fewer")
+    }
+    const allowed = await this.fga.canAccessVm(ownerId, cleanSlug)
+    if (!allowed) throw new NotFoundException(`VM "${cleanSlug}" not found.`)
+    const path = jsonPointerLabel(VM_DISPLAY_NAME_ANNOTATION)
+    await k8sApps()
+      .patchNamespacedStatefulSet({
+        name: cleanSlug,
+        namespace: RESOURCE_NS,
+        body: [
+          { op: "add", path: `/metadata/annotations${path}`, value: trimmed },
+        ] as unknown as object,
+      })
+      .catch((err) => rethrowK8sError(err, `Failed to rename VM "${cleanSlug}"`))
+  }
+
   // oauth2-proxy forwards as `X-Auth-Request-Email`, looks up the
   // better-auth user id (FGA tuples are written with that id), and
   // checks ownership against the slug derived from the request host.

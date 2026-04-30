@@ -21,6 +21,10 @@ import {
   LB_VM_LABEL,
 } from "./loadbalancers.types"
 
+function jsonPointerLabel(label: string): string {
+  return `/${label.replace(/~/g, "~0").replace(/\//g, "~1")}`
+}
+
 function sanitizeLabel(value: string): string {
   return value
     .toLowerCase()
@@ -221,6 +225,41 @@ export class LoadBalancersService {
     const created = list.find((x) => x.slug === slug)
     if (!created) throw new NotFoundException("LoadBalancer created but not found.")
     return created
+  }
+
+  // Update the LB's display name. Slug is immutable; only the
+  // annotation moves — on BOTH the Service and the HTTPRoute since
+  // either may be read by listers depending on the path.
+  async rename(ownerId: string, slug: string, newName: string): Promise<void> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug) throw new BadRequestException("Invalid LB slug.")
+    const trimmed = newName.trim()
+    if (!trimmed) throw new BadRequestException("name is required")
+    if (trimmed.length > 200) {
+      throw new BadRequestException("name must be 200 characters or fewer")
+    }
+    const allowed = await this.fga.canAccessLoadBalancer(ownerId, cleanSlug)
+    if (!allowed) {
+      throw new NotFoundException(`LoadBalancer "${cleanSlug}" not found.`)
+    }
+    const ns = RESOURCE_NS
+    const path = jsonPointerLabel(LB_DISPLAY_NAME_ANNOTATION)
+    const patch = [
+      { op: "add", path: `/metadata/annotations${path}`, value: trimmed },
+    ] as unknown as object
+    await k8sCore()
+      .patchNamespacedService({ name: cleanSlug, namespace: ns, body: patch })
+      .catch((err) => rethrowK8sError(err, `Failed to rename LB "${cleanSlug}"`))
+    await k8sCustom()
+      .patchNamespacedCustomObject({
+        group: "gateway.networking.k8s.io",
+        version: "v1",
+        namespace: ns,
+        plural: "httproutes",
+        name: cleanSlug,
+        body: patch,
+      })
+      .catch(() => undefined)
   }
 
   async delete(ownerId: string, slug: string): Promise<void> {

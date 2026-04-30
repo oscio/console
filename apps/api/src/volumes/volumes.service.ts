@@ -223,6 +223,30 @@ export class VolumesService {
     }
   }
 
+  // Update the volume's display name. The slug is immutable (it's
+  // the K8s resource name); only the annotation moves. FGA-gated.
+  async rename(ownerId: string, slug: string, newName: string): Promise<void> {
+    const cleanSlug = sanitizeLabel(slug)
+    if (!cleanSlug) throw new BadRequestException("Invalid volume slug.")
+    const trimmed = newName.trim()
+    if (!trimmed) throw new BadRequestException("name is required")
+    if (trimmed.length > 200) {
+      throw new BadRequestException("name must be 200 characters or fewer")
+    }
+    const allowed = await this.fga.canAccessVolume(ownerId, cleanSlug)
+    if (!allowed) throw new NotFoundException(`Volume "${cleanSlug}" not found.`)
+    const path = jsonPointerLabel(VOLUME_DISPLAY_NAME_ANNOTATION)
+    await k8sCore()
+      .patchNamespacedPersistentVolumeClaim({
+        name: cleanSlug,
+        namespace: RESOURCE_NS,
+        body: [
+          { op: "add", path: `/metadata/annotations${path}`, value: trimmed },
+        ] as unknown as object,
+      })
+      .catch((err) => rethrowK8sError(err, `Failed to rename volume "${cleanSlug}"`))
+  }
+
   // The k8s-client v1.x defaults patch Content-Type to JSON Patch
   // (RFC 6902, an array of `{op, path, value}`). The `body` arg is
   // typed as `object`, but Kubernetes' API server rejects anything
