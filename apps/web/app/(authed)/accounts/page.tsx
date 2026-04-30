@@ -126,34 +126,43 @@ export default async function AccountsPage() {
                     </TableCell>
                     {canManageRoles && (
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {u.isPlatformAdmin ? (
-                            <span className="text-muted-foreground text-xs">
-                              —
-                            </span>
-                          ) : (
-                            <form action={toggleConsoleAdmin}>
-                              <input type="hidden" name="userId" value={u.id} />
-                              <input
-                                type="hidden"
-                                name="grant"
-                                value={u.isConsoleAdmin ? "false" : "true"}
-                              />
-                              <Button type="submit" variant="outline" size="sm">
-                                {u.isConsoleAdmin
-                                  ? "Revoke console-admin"
-                                  : "Grant console-admin"}
-                              </Button>
-                            </form>
-                          )}
-                          {u.id !== "system" && (
-                            <DeleteUserButton
-                              action={deleteUser}
-                              userId={u.id}
-                              label={u.name ?? u.email}
-                            />
-                          )}
-                        </div>
+                        {(() => {
+                          const canToggleRole = !u.isPlatformAdmin
+                          const canDelete = u.id !== "system"
+                          if (!canToggleRole && !canDelete) {
+                            return (
+                              <span className="text-muted-foreground text-xs">
+                                —
+                              </span>
+                            )
+                          }
+                          return (
+                            <div className="flex items-center justify-end gap-2">
+                              {canToggleRole && (
+                                <form action={toggleConsoleAdmin}>
+                                  <input type="hidden" name="userId" value={u.id} />
+                                  <input
+                                    type="hidden"
+                                    name="grant"
+                                    value={u.isConsoleAdmin ? "false" : "true"}
+                                  />
+                                  <Button type="submit" variant="outline" size="sm">
+                                    {u.isConsoleAdmin
+                                      ? "Revoke console-admin"
+                                      : "Grant console-admin"}
+                                  </Button>
+                                </form>
+                              )}
+                              {canDelete && (
+                                <DeleteUserButton
+                                  action={deleteUser}
+                                  userId={u.id}
+                                  label={u.name ?? u.email}
+                                />
+                              )}
+                            </div>
+                          )
+                        })()}
                       </TableCell>
                     )}
                   </TableRow>
