@@ -14,6 +14,7 @@ import {
 import {
   createVm,
   deleteVm,
+  fetchMe,
   fetchVms,
   fetchVolumes,
   type VmAgentType,
@@ -68,7 +69,11 @@ async function createVmAction(formData: FormData) {
     agentType === "zeroclaw" && agentModelRaw.length > 0
       ? agentModelRaw
       : undefined
-  const clusterAdmin = formData.get("clusterAdmin") === "true"
+  const kubectlAccessRaw = String(formData.get("kubectlAccess") ?? "none")
+  const kubectlAccess: "none" | "resource-admin" | "cluster-admin" =
+    kubectlAccessRaw === "resource-admin" || kubectlAccessRaw === "cluster-admin"
+      ? kubectlAccessRaw
+      : "none"
   if (!name) return { error: "name is required" }
   try {
     await createVm(cookieHeader, {
@@ -83,7 +88,7 @@ async function createVmAction(formData: FormData) {
       volumeSlug,
       loadBalancers: loadBalancers.length ? loadBalancers : undefined,
       agentModel,
-      clusterAdmin,
+      kubectlAccess,
     })
   } catch (err) {
     return { error: (err as Error).message }
@@ -106,12 +111,14 @@ async function deleteVmAction(formData: FormData) {
 
 export default async function VmsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
-  const [vms, volumes, models] = await Promise.all([
+  const [vms, volumes, models, me] = await Promise.all([
     fetchVms(cookieHeader),
     fetchVolumes(cookieHeader),
     fetchAgentModels(),
+    fetchMe(cookieHeader),
   ])
   const freeVolumes = (volumes ?? []).filter((v) => !v.boundTo)
+  const isAdmin = !!(me?.isPlatformAdmin || me?.isConsoleAdmin)
   const pending = (vms ?? []).some(
     (v) => v.status === "Pending" || v.status === "Unknown",
   )
@@ -131,6 +138,7 @@ export default async function VmsPage() {
             action={createVmAction}
             freeVolumes={freeVolumes}
             models={models}
+            isAdmin={isAdmin}
           />
         )}
       </div>

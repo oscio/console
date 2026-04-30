@@ -38,6 +38,7 @@ export function NewVmForm({
   action,
   freeVolumes,
   models,
+  isAdmin,
 }: {
   action: Action
   // Volumes the current user owns that aren't bound to any VM —
@@ -45,6 +46,10 @@ export function NewVmForm({
   freeVolumes: Volume[]
   // OpenRouter model catalog for the attached-agent dropdown.
   models: AgentModel[]
+  // Whether the caller is platform-admin or console-admin. Gates
+  // the visibility of the resource-admin / cluster-admin kubectl
+  // tiers — server re-checks regardless.
+  isAdmin: boolean
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -72,11 +77,12 @@ export function NewVmForm({
     DEFAULT_AGENT_MODEL
   const [agentModel, setAgentModel] = useState<string>(initialAgentModel)
 
-  // Cluster-admin opt-in. Off by default; the api always grants
-  // namespace-admin in `resource` ns so kubectl works for own-VM
-  // operations regardless. cluster-admin is the extra-broad grant
-  // for terraform-apply / cross-namespace work.
-  const [clusterAdmin, setClusterAdmin] = useState(false)
+  // kubectl access tier. Default "none" for everyone — no SA token
+  // mounted, kubectl unusable. Higher tiers only available to
+  // admins (server enforces; UI just hides the options).
+  const [kubectlAccess, setKubectlAccess] = useState<
+    "none" | "resource-admin" | "cluster-admin"
+  >("none")
 
   // Multiple LBs per VM. Each item becomes one ClusterIP Service +
   // HTTPRoute pair on the api side. `key` is React-only — stripped
@@ -360,30 +366,43 @@ export function NewVmForm({
             )}
           </div>
 
-          {/* Per-VM ServiceAccount + namespace-admin RoleBinding are
-              always created (so kubectl works out of the box for own-VM
-              operations). Cluster-admin is opt-in for terraform-apply /
-              cross-namespace work. */}
+          {/* kubectl tier. Default "none" — no SA token, no kubectl.
+              Admins (platform / console) can pick a higher tier; the
+              api re-checks regardless. */}
           <div className="space-y-1.5">
-            <Label>kubectl access</Label>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                name="clusterAdmin"
-                value="true"
-                checked={clusterAdmin}
-                onChange={(e) => setClusterAdmin(e.target.checked)}
-                className="mt-1"
-              />
-              <span>
-                Grant cluster-admin
-                <span className="text-muted-foreground ml-2 text-xs">
-                  Default: namespace-admin in <code>resource</code>.
-                  Tick to also bind cluster-admin (full cluster access
-                  for <code>terraform apply</code> / cross-namespace).
-                </span>
-              </span>
-            </label>
+            <Label htmlFor="vm-kubectl-access">kubectl access</Label>
+            <input type="hidden" name="kubectlAccess" value={kubectlAccess} />
+            {isAdmin ? (
+              <Select
+                value={kubectlAccess}
+                onValueChange={(v) =>
+                  setKubectlAccess(
+                    v as "none" | "resource-admin" | "cluster-admin",
+                  )
+                }
+              >
+                <SelectTrigger id="vm-kubectl-access" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">none</SelectItem>
+                  <SelectItem value="resource-admin">resource-admin</SelectItem>
+                  <SelectItem value="cluster-admin">cluster-admin</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-muted-foreground text-xs">
+                Regular users get no kubectl. Use the console UI; ask a
+                platform-admin to elevate if you need it.
+              </p>
+            )}
+            <p className="text-muted-foreground text-xs">
+              <code>none</code> mounts no SA token (kubectl unusable).{" "}
+              <code>resource-admin</code> binds the built-in <code>admin</code>{" "}
+              ClusterRole inside <code>resource</code> ns.{" "}
+              <code>cluster-admin</code> binds full cluster-admin —
+              for <code>terraform apply</code> / platform work.
+            </p>
           </div>
 
           {/* Load Balancers (optional, default empty). Each row becomes

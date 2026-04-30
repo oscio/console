@@ -15,6 +15,7 @@ import { VolumesService } from "../volumes/volumes.service"
 import { k8sApps, k8sCore, k8sCustom, k8sRbac } from "./k8s.client"
 import {
   CreateVmInput,
+  KubectlAccessTier,
   Vm,
   VM_AGENT_TYPE_LABEL,
   VM_DATA_MOUNT_PATH,
@@ -241,13 +242,14 @@ export class VmsService {
 
     await this.ensureService(ns, slug, input.imageType)
 
-    // Per-VM ServiceAccount so kubectl-from-the-VM has its own
-    // identity (not the namespace's default SA, which has nothing).
-    // Always-on RoleBinding gives `admin` inside `resource` ns;
-    // opt-in ClusterRoleBinding adds cluster-wide cluster-admin for
-    // `terraform apply` / cross-namespace work. Both are
-    // cascade-deleted in delete().
-    await this.ensureVmServiceAccount(ns, slug, ownerId, !!input.clusterAdmin)
+    // Per-VM kubectl access tier. "none" leaves the pod with no SA
+    // token at all (automountServiceAccountToken=false in pod spec
+    // below). The other tiers create a per-VM SA + binding so the
+    // workspace pod identifies as itself when calling the api.
+    const kubectlTier: KubectlAccessTier = input.kubectlAccess ?? "none"
+    if (kubectlTier !== "none") {
+      await this.ensureVmServiceAccount(ns, slug, ownerId, kubectlTier)
+    }
 
     let sshKeySecretName: string | null = null
     if (wantAgent) {
@@ -399,7 +401,14 @@ export class VmsService {
                 },
               },
               spec: ({
-                serviceAccountName: slug,
+                // SA-related fields depend on the kubectl tier:
+                //   none → no SA, no token mount (start.sh's
+                //         kubeconfig generator no-ops cleanly when
+                //         /var/run/secrets/.../token is missing)
+                //   other → per-VM SA created above, mount its token
+                ...(kubectlTier === "none"
+                  ? { automountServiceAccountToken: false }
+                  : { serviceAccountName: slug }),
                 containers,
                 volumes: podVolumes,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -577,17 +586,18 @@ export class VmsService {
     }
   }
 
-  // Create the per-VM ServiceAccount + RoleBinding (always) and
-  // ClusterRoleBinding (opt-in). Pod spec sets serviceAccountName=slug
-  // so kubelet projects this SA's token; agent-sandbox's start.sh
-  // turns that token into ~/.kube/config so kubectl Just Works in the
-  // VM. ConflictException is swallowed so re-running create after a
-  // partial failure is idempotent.
+  // Create the per-VM ServiceAccount + the binding for the chosen
+  // kubectl tier. Pod spec sets serviceAccountName=slug so kubelet
+  // projects this SA's token; agent-sandbox's start.sh turns that
+  // token into ~/.kube/config so kubectl Just Works in the VM.
+  // ConflictException is swallowed so re-running create after a
+  // partial failure is idempotent. Caller skips this entirely for
+  // the "none" tier — no SA, no bindings.
   private async ensureVmServiceAccount(
     ns: string,
     slug: string,
     ownerId: string,
-    clusterAdmin: boolean,
+    tier: Exclude<KubectlAccessTier, "none">,
   ): Promise<void> {
     const labels = {
       [VM_LABEL]: VM_LABEL_VALUE,
@@ -610,29 +620,30 @@ export class VmsService {
         },
       })
       .catch(swallow409)
-    // Namespace-scoped admin so the user can manage their own VMs /
-    // agents / LBs / volumes via kubectl. `admin` ClusterRole is the
-    // canonical "do anything in this namespace" role.
-    await rbac
-      .createNamespacedRoleBinding({
-        namespace: ns,
-        body: {
-          apiVersion: "rbac.authorization.k8s.io/v1",
-          kind: "RoleBinding",
-          metadata: { name: slug, namespace: ns, labels },
-          subjects: [{ kind: "ServiceAccount", name: slug, namespace: ns }],
-          roleRef: {
-            apiGroup: "rbac.authorization.k8s.io",
-            kind: "ClusterRole",
-            name: "admin",
+    if (tier === "resource-admin") {
+      // Bind built-in `admin` ClusterRole inside `resource` ns —
+      // full edit on every resource type in this namespace, no
+      // cluster-wide reach.
+      await rbac
+        .createNamespacedRoleBinding({
+          namespace: ns,
+          body: {
+            apiVersion: "rbac.authorization.k8s.io/v1",
+            kind: "RoleBinding",
+            metadata: { name: slug, namespace: ns, labels },
+            subjects: [{ kind: "ServiceAccount", name: slug, namespace: ns }],
+            roleRef: {
+              apiGroup: "rbac.authorization.k8s.io",
+              kind: "ClusterRole",
+              name: "admin",
+            },
           },
-        },
-      })
-      .catch(swallow409)
-    if (clusterAdmin) {
-      // Cluster-wide cluster-admin. Lives outside any namespace, so
-      // we encode the VM identity in the binding name (vm-<slug>) for
-      // cleanup. Same labels make orphan-finding easy.
+        })
+        .catch(swallow409)
+    } else if (tier === "cluster-admin") {
+      // ClusterRoleBinding lives outside any namespace, so we encode
+      // the VM identity in the binding name (vm-<slug>) for cleanup.
+      // Same labels make orphan-finding easy.
       await rbac
         .createClusterRoleBinding({
           body: {

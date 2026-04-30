@@ -145,9 +145,9 @@ export async function createVm(
     }>
     // OpenRouter model id for the attached agent (zeroclaw only).
     agentModel?: string
-    // When true, the VM gets a cluster-admin ClusterRoleBinding
-    // (in addition to the default namespace-admin RoleBinding).
-    clusterAdmin?: boolean
+    // kubectl access tier the VM gets. "none" = no SA token, no
+    // kubectl. Other tiers are admin-only on the server side.
+    kubectlAccess?: "none" | "resource-admin" | "cluster-admin"
   },
 ): Promise<Vm> {
   const res = await fetch(`${API_URL}/vms`, {

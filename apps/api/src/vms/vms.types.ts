@@ -72,13 +72,32 @@ export type CreateVmInput = {
     port: number
   }>
 
-  // When true, the VM gets a ClusterRoleBinding to `cluster-admin` in
-  // addition to the default per-VM ServiceAccount + namespace-admin
-  // RoleBinding. Useful when the user wants `terraform apply` /
-  // platform-wide kubectl from inside the workspace; not the default
-  // because the binding survives until VM delete.
-  clusterAdmin?: boolean
+  // kubectl access tier the workspace pod gets. Server validates
+  // against the caller's FGA role:
+  //   regular            → "none" only (other values = 403)
+  //   console / platform-admin → any
+  //
+  // Mapping to RBAC:
+  //   "none"           → no SA token mounted (automountServiceAccountToken=false),
+  //                      no bindings created. kubectl unusable.
+  //   "resource-admin" → per-VM SA + RoleBinding to built-in `admin`
+  //                      ClusterRole in `resource` ns. Full edit on
+  //                      everything in that ns. Caveat: shared ns
+  //                      means the binding sees other users' resources
+  //                      too — accept this for admin tiers since they
+  //                      are by definition trusted.
+  //   "cluster-admin"  → per-VM SA + ClusterRoleBinding to built-in
+  //                      `cluster-admin`. Full cluster powers, useful
+  //                      for `terraform apply` and platform-* work.
+  kubectlAccess?: KubectlAccessTier
 }
+
+export type KubectlAccessTier = "none" | "resource-admin" | "cluster-admin"
+export const KUBECTL_ACCESS_TIERS: readonly KubectlAccessTier[] = [
+  "none",
+  "resource-admin",
+  "cluster-admin",
+] as const
 
 // Defaults shown in the UI as "Recommended" + applied when caller
 // omits the field. Sized for a 1-user dev workspace; bumpable on the

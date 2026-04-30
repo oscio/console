@@ -9,16 +9,27 @@ import {
   HttpCode,
   Param,
   Post,
+  Req,
   UseGuards,
 } from "@nestjs/common"
 import { type AppSession } from "@workspace/auth"
 import { AGENT_MODEL_RE } from "../agents/agents.types"
-import { AuthGuard } from "../auth/auth.guard"
-import { ConsoleAdminGuard, PLATFORM_ADMIN_GROUP } from "../auth/admin.guard"
+import { AuthedRequest, AuthGuard } from "../auth/auth.guard"
+import {
+  ConsoleAdminGuard,
+  isPlatformAdmin,
+  PLATFORM_ADMIN_GROUP,
+} from "../auth/admin.guard"
 import { CurrentSession } from "../auth/session.decorator"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { VmsService } from "./vms.service"
-import { CreateVmInput, VmAgentType, VmImageType } from "./vms.types"
+import {
+  CreateVmInput,
+  KUBECTL_ACCESS_TIERS,
+  KubectlAccessTier,
+  VmAgentType,
+  VmImageType,
+} from "./vms.types"
 
 const ALLOWED_IMAGE: ReadonlySet<VmImageType> = new Set(["base", "desktop"])
 const ALLOWED_AGENT: ReadonlySet<VmAgentType> = new Set([
@@ -26,6 +37,7 @@ const ALLOWED_AGENT: ReadonlySet<VmAgentType> = new Set([
   "hermes",
   "zeroclaw",
 ])
+const ALLOWED_KUBECTL: ReadonlySet<KubectlAccessTier> = new Set(KUBECTL_ACCESS_TIERS)
 
 // Traefik ForwardAuth target. Called for every request to a VM
 // hostname (vm-XXX-{term,code,vnc}.vm.<domain>) AFTER oauth2-proxy
@@ -93,6 +105,7 @@ export class VmsController {
   async create(
     @Body() body: Partial<CreateVmInput>,
     @CurrentSession() session: AppSession,
+    @Req() req: AuthedRequest,
   ) {
     const name = (body.name ?? "").toString().trim()
     const imageType = body.imageType as VmImageType
@@ -132,6 +145,25 @@ export class VmsController {
       }
       agentModel = body.agentModel
     }
+    // kubectlAccess: validate the value is a known tier, then gate
+    // the non-default tiers behind admin status. Regular users only
+    // get "none" (no kubectl). The UI hides the higher options for
+    // them, but we re-check here in case someone bypasses the form.
+    const kubectlAccess = (body.kubectlAccess ?? "none") as KubectlAccessTier
+    if (!ALLOWED_KUBECTL.has(kubectlAccess)) {
+      throw new BadRequestException(
+        `kubectlAccess must be one of: ${[...ALLOWED_KUBECTL].join(", ")}`,
+      )
+    }
+    if (kubectlAccess !== "none") {
+      const isAdmin =
+        isPlatformAdmin(req) || (await this.fga.isConsoleAdmin(session.user.id))
+      if (!isAdmin) {
+        throw new ForbiddenException(
+          "kubectlAccess above 'none' requires console-admin or platform-admin",
+        )
+      }
+    }
     return this.vms.create(session.user.id, {
       name,
       imageType,
@@ -146,7 +178,7 @@ export class VmsController {
       volumeSlug: body.volumeSlug,
       loadBalancers,
       agentModel,
-      clusterAdmin: !!body.clusterAdmin,
+      kubectlAccess,
     })
   }
 
