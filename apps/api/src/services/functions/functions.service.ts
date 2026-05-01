@@ -18,7 +18,7 @@ import { getTemplate } from "./templates"
 import {
   deleteFunctionCodeConfigMap,
   deleteKnativeService,
-  ensureKnativeService,
+  ensureDevService,
   getRuntimeMode,
   invokeFunction,
   productionImageRef,
@@ -393,6 +393,7 @@ export class FunctionsService {
       path: string
       headers?: Record<string, string>
       body?: string
+      target?: "dev" | "prod"
     },
   ): Promise<{
     status: number
@@ -404,9 +405,10 @@ export class FunctionsService {
     }
     const first = await invokeFunction(slug, request)
     if (first.status !== 404 || first.body) return first
-    // 404 with empty body matches Kourier's no-such-host signature —
-    // try to materialise the runtime and retry. If the function is
-    // genuinely returning a 404 of its own, we'd see a non-empty body.
+    // 404 with empty body = Kourier no-such-host. Self-heal only the
+    // dev surface — prod is owner-driven via Deploy and shouldn't be
+    // implicitly created by an invocation.
+    if ((request.target ?? "dev") !== "dev") return first
     try {
       const owners = await this.fga.listFunctionOwners(slug)
       if (owners.length === 0) return first
@@ -462,12 +464,15 @@ export class FunctionsService {
     return { image, sha }
   }
 
-  // Read current runtime mode (dev / prod) + image ref. Used by the
-  // detail page and Editor's Deploy button to label state.
+  // Read both dev and prod surface state. UI uses this to label
+  // which surfaces exist, what image prod is pinned to, etc.
   async getRuntime(
     ownerId: string,
     slug: string,
-  ): Promise<{ mode: "dev" | "prod" | "unknown"; image: string | null }> {
+  ): Promise<{
+    dev: { exists: boolean; image: string | null }
+    prod: { exists: boolean; image: string | null }
+  }> {
     if (!(await this.fga.canAccessFunction(ownerId, slug))) {
       throw new NotFoundException(`function ${slug} not found`)
     }
@@ -511,7 +516,7 @@ export class FunctionsService {
       }
     }
     await syncFunctionCodeConfigMap(slug, fileEntries, tpl.userFolder)
-    await ensureKnativeService(slug)
+    await ensureDevService(slug)
   }
 
   async delete(ownerId: string, slug: string): Promise<void> {

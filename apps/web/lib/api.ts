@@ -740,8 +740,12 @@ export type FunctionInvocationResult = {
 }
 
 export type FunctionRuntimeStatus = {
-  mode: "dev" | "prod" | "unknown"
-  image: string | null
+  // Dev surface: ConfigMap-mounted, hot-reloads on Save. Always
+  // present once a function has been Saved at least once.
+  dev: { exists: boolean; image: string | null }
+  // Prod surface: built image, baked-in code. Only exists after a
+  // successful Deploy.
+  prod: { exists: boolean; image: string | null }
 }
 
 export async function fetchFunctionRuntime(
@@ -786,6 +790,10 @@ export async function invokeFunction(
     path: string
     headers?: Record<string, string>
     body?: string
+    // Default "dev" — Test tab hits the editor preview surface so
+    // unsaved-but-committed changes are exercised. Pass "prod" to
+    // hit the deployed Knative Service explicitly.
+    target?: "dev" | "prod"
   },
 ): Promise<FunctionInvocationResult> {
   const res = await fetch(

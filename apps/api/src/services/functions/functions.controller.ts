@@ -95,6 +95,7 @@ export class FunctionsController {
       path?: string
       headers?: Record<string, string>
       body?: string
+      target?: "dev" | "prod"
     },
     @CurrentSession() session: AppSession,
   ) {
@@ -103,6 +104,7 @@ export class FunctionsController {
       path: String(body.path ?? "/"),
       headers: body.headers ?? {},
       body: typeof body.body === "string" ? body.body : "",
+      target: body.target === "prod" ? "prod" : "dev",
     })
   }
 

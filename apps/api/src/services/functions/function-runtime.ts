@@ -60,10 +60,18 @@ export function configMapName(slug: string): string {
   return `function-code-${slug}`
 }
 
-export function knativeServiceName(slug: string): string {
-  // Slug already starts `function-` so we'd otherwise end up with
-  // `function-function-XXXX` — keep it just `<slug>`.
+// Two Knative Services per function. `<slug>` is the production
+// surface (built image, baked-in code, the URL users actually call);
+// `<slug>-dev` is the editor preview (dev image + ConfigMap-mounted
+// code, scale-to-zero like prod). Splitting them means Save can roll
+// dev fast without disturbing prod, and Deploy promotes only when
+// the user is ready.
+export function prodServiceName(slug: string): string {
   return slug
+}
+
+export function devServiceName(slug: string): string {
+  return `${slug}-dev`
 }
 
 // ----- ConfigMap -----------------------------------------------------------
@@ -145,151 +153,19 @@ export async function deleteFunctionCodeConfigMap(slug: string): Promise<void> {
 
 // ----- Knative Service -----------------------------------------------------
 
-// The dev pod mounts the ConfigMap at /app/function so the dev
-// runner picks up edits without a rebuild.
-//
 // Update strategy is GET → modify-spec → replace (PUT). Knative's
-// admission webhook treats `metadata.annotations.serving.knative.dev/
-// creator` (and a few siblings) as immutable, so a wholesale replace
-// with a freshly-built body is rejected. Instead we keep the
-// existing object as the base, swap only `spec` + the bits of our
-// `metadata.labels` we care about, and PUT.
+// admission webhook treats annotations like
+// `metadata.annotations.serving.knative.dev/creator` as immutable,
+// so a wholesale replace with a freshly-built body is rejected.
+// Keep the existing object as the base, swap only `spec` and the
+// bits of `metadata.labels` we own, and PUT.
 //
 // (Patch with an object body would be cleaner but the
 // @kubernetes/client-node v1 typed client defaults to
 // application/json-patch+json content type, which expects a JSON
 // Patch array.)
-export async function ensureKnativeService(slug: string): Promise<void> {
+async function ensureService(name: string, desired: KnativeServiceBody): Promise<void> {
   const custom = k8sCustom()
-  const name = knativeServiceName(slug)
-  const cm = configMapName(slug)
-
-  const desired = buildKnativeServiceBody({ name, slug, configMap: cm })
-
-  type KsvcShape = {
-    metadata?: {
-      resourceVersion?: string
-      labels?: Record<string, string>
-      annotations?: Record<string, string>
-    }
-    spec?: unknown
-  }
-  let existing: KsvcShape | null = null
-  try {
-    const res = (await custom.getNamespacedCustomObject({
-      group: "serving.knative.dev",
-      version: "v1",
-      namespace: RESOURCE_NS,
-      plural: "services",
-      name,
-    })) as KsvcShape
-    existing = res
-  } catch (err) {
-    if (!isNotFound(err)) throw err
-  }
-
-  if (existing) {
-    const merged = {
-      ...existing,
-      metadata: {
-        ...existing.metadata,
-        labels: {
-          ...(existing.metadata?.labels ?? {}),
-          ...desired.metadata.labels,
-        },
-        // annotations preserved as-is from existing — Knative-managed.
-      },
-      spec: desired.spec,
-    }
-    await custom.replaceNamespacedCustomObject({
-      group: "serving.knative.dev",
-      version: "v1",
-      namespace: RESOURCE_NS,
-      plural: "services",
-      name,
-      body: merged,
-    })
-  } else {
-    await custom.createNamespacedCustomObject({
-      group: "serving.knative.dev",
-      version: "v1",
-      namespace: RESOURCE_NS,
-      plural: "services",
-      body: desired,
-    })
-  }
-}
-
-type KnativeServiceBody = {
-  apiVersion: string
-  kind: string
-  metadata: {
-    name: string
-    namespace: string
-    labels: Record<string, string>
-    resourceVersion?: string
-  }
-  spec: unknown
-}
-
-function buildKnativeServiceBody(input: {
-  name: string
-  slug: string
-  // Dev mode: configMap is set + image is the dev runner. Code is
-  // ConfigMap-mounted so saves hot-reload without a build.
-  // Prod mode: image is the function-specific built image, no
-  // ConfigMap (code is baked in). Caller chooses which to pass.
-  configMap?: string
-  image?: string
-}): KnativeServiceBody {
-  const useConfigMap = !!input.configMap && !input.image
-  const image = input.image ?? devImage()
-  const annotations: Record<string, string> = {
-    "agent-platform/code-version": String(Date.now()),
-    "agent-platform/mode": useConfigMap ? "dev" : "prod",
-  }
-  const container: Record<string, unknown> = {
-    image,
-    ports: [{ containerPort: 8080 }],
-  }
-  const volumes: unknown[] = []
-  if (useConfigMap) {
-    container.volumeMounts = [{ name: "code", mountPath: "/app/function" }]
-    volumes.push({ name: "code", configMap: { name: input.configMap } })
-  }
-  return {
-    apiVersion: "serving.knative.dev/v1",
-    kind: "Service",
-    metadata: {
-      name: input.name,
-      namespace: RESOURCE_NS,
-      labels: {
-        [FUNCTION_LABEL]: FUNCTION_LABEL_VALUE,
-        [FUNCTION_SLUG_LABEL]: input.slug,
-      },
-    },
-    spec: {
-      template: {
-        metadata: { annotations },
-        spec: {
-          containers: [container],
-          ...(volumes.length > 0 ? { volumes } : {}),
-        },
-      },
-    },
-  }
-}
-
-// Deploy flow: swap the Knative Service to a function-specific built
-// image. Drops the ConfigMap mount (production code is baked in),
-// bumps the code-version annotation so a new Revision rolls.
-export async function setProductionImage(
-  slug: string,
-  imageRef: string,
-): Promise<void> {
-  const custom = k8sCustom()
-  const name = knativeServiceName(slug)
-  const desired = buildKnativeServiceBody({ name, slug, image: imageRef })
 
   type KsvcShape = {
     metadata?: {
@@ -343,12 +219,98 @@ export async function setProductionImage(
   }
 }
 
-// Read the current Knative Service mode + image. Used by the UI to
-// label the Deploy button and to surface what's currently in prod.
-export async function getRuntimeMode(slug: string): Promise<{
-  mode: "dev" | "prod" | "unknown"
+// Save flow: update the dev Service (dev image + ConfigMap mount).
+// Production Service is left untouched — Save and Deploy are now
+// independent surfaces.
+export async function ensureDevService(slug: string): Promise<void> {
+  const name = devServiceName(slug)
+  const cm = configMapName(slug)
+  await ensureService(
+    name,
+    buildKnativeServiceBody({ name, slug, mode: "dev", configMap: cm }),
+  )
+}
+
+type KnativeServiceBody = {
+  apiVersion: string
+  kind: string
+  metadata: {
+    name: string
+    namespace: string
+    labels: Record<string, string>
+    resourceVersion?: string
+  }
+  spec: unknown
+}
+
+const FUNCTION_MODE_LABEL = "agent-platform/function-mode"
+
+function buildKnativeServiceBody(input: {
+  name: string
+  slug: string
+  mode: "dev" | "prod"
+  configMap?: string
+  image?: string
+}): KnativeServiceBody {
+  const useConfigMap = input.mode === "dev"
+  const image = input.image ?? devImage()
+  const annotations: Record<string, string> = {
+    "agent-platform/code-version": String(Date.now()),
+    "agent-platform/mode": input.mode,
+  }
+  const container: Record<string, unknown> = {
+    image,
+    ports: [{ containerPort: 8080 }],
+  }
+  const volumes: unknown[] = []
+  if (useConfigMap && input.configMap) {
+    container.volumeMounts = [{ name: "code", mountPath: "/app/function" }]
+    volumes.push({ name: "code", configMap: { name: input.configMap } })
+  }
+  return {
+    apiVersion: "serving.knative.dev/v1",
+    kind: "Service",
+    metadata: {
+      name: input.name,
+      namespace: RESOURCE_NS,
+      labels: {
+        [FUNCTION_LABEL]: FUNCTION_LABEL_VALUE,
+        [FUNCTION_SLUG_LABEL]: input.slug,
+        [FUNCTION_MODE_LABEL]: input.mode,
+      },
+    },
+    spec: {
+      template: {
+        metadata: { annotations },
+        spec: {
+          containers: [container],
+          ...(volumes.length > 0 ? { volumes } : {}),
+        },
+      },
+    },
+  }
+}
+
+// Deploy flow: stand up (or update) the prod Knative Service with
+// the function-specific built image. Doesn't touch the dev Service —
+// dev keeps tracking the latest Save independently.
+export async function setProductionImage(
+  slug: string,
+  imageRef: string,
+): Promise<void> {
+  const name = prodServiceName(slug)
+  await ensureService(
+    name,
+    buildKnativeServiceBody({ name, slug, mode: "prod", image: imageRef }),
+  )
+}
+
+type ServiceState = {
+  exists: boolean
   image: string | null
-}> {
+}
+
+async function readServiceState(name: string): Promise<ServiceState> {
   const custom = k8sCustom()
   try {
     const res = (await custom.getNamespacedCustomObject({
@@ -356,47 +318,50 @@ export async function getRuntimeMode(slug: string): Promise<{
       version: "v1",
       namespace: RESOURCE_NS,
       plural: "services",
-      name: knativeServiceName(slug),
+      name,
     })) as {
       spec?: {
-        template?: {
-          metadata?: { annotations?: Record<string, string> }
-          spec?: {
-            containers?: Array<{ image?: string }>
-          }
-        }
+        template?: { spec?: { containers?: Array<{ image?: string }> } }
       }
     }
-    const ann = res.spec?.template?.metadata?.annotations ?? {}
     const image = res.spec?.template?.spec?.containers?.[0]?.image ?? null
-    const mode =
-      ann["agent-platform/mode"] === "prod"
-        ? "prod"
-        : ann["agent-platform/mode"] === "dev"
-          ? "dev"
-          : "unknown"
-    return { mode, image }
+    return { exists: true, image }
   } catch (err) {
-    if (isNotFound(err)) return { mode: "unknown", image: null }
+    if (isNotFound(err)) return { exists: false, image: null }
     throw err
   }
 }
 
+// Read both Service states. UI uses this to label which surfaces
+// exist + which image prod is pinned to.
+export async function getRuntimeMode(slug: string): Promise<{
+  dev: { exists: boolean; image: string | null }
+  prod: { exists: boolean; image: string | null }
+}> {
+  const [dev, prod] = await Promise.all([
+    readServiceState(devServiceName(slug)),
+    readServiceState(prodServiceName(slug)),
+  ])
+  return { dev, prod }
+}
+
 export async function deleteKnativeService(slug: string): Promise<void> {
   const custom = k8sCustom()
-  await custom
-    .deleteNamespacedCustomObject({
-      group: "serving.knative.dev",
-      version: "v1",
-      namespace: RESOURCE_NS,
-      plural: "services",
-      name: knativeServiceName(slug),
-    })
-    .catch((err) => {
-      if (!isNotFound(err)) {
-        log.warn(`deleteKnativeService ${slug}: ${(err as Error).message}`)
-      }
-    })
+  for (const name of [devServiceName(slug), prodServiceName(slug)]) {
+    await custom
+      .deleteNamespacedCustomObject({
+        group: "serving.knative.dev",
+        version: "v1",
+        namespace: RESOURCE_NS,
+        plural: "services",
+        name,
+      })
+      .catch((err) => {
+        if (!isNotFound(err)) {
+          log.warn(`deleteKnativeService ${name}: ${(err as Error).message}`)
+        }
+      })
+  }
 }
 
 // ----- Invoke proxy --------------------------------------------------------
@@ -417,21 +382,27 @@ export async function invokeFunction(
     path: string
     headers?: Record<string, string>
     body?: string
+    // Which surface to call. Test tab defaults to dev so unsaved-but-
+    // not-yet-deployed code is what gets exercised.
+    target?: "dev" | "prod"
   },
 ): Promise<{
   status: number
   headers: Record<string, string>
   body: string
 }> {
-  const host = `${knativeServiceName(slug)}.${RESOURCE_NS}.${functionDomain()}`
+  const surface = request.target ?? "dev"
+  const serviceName =
+    surface === "prod" ? prodServiceName(slug) : devServiceName(slug)
+  const host = `${serviceName}.${RESOURCE_NS}.${functionDomain()}`
   const path = request.path.startsWith("/") ? request.path : `/${request.path}`
-  const target = new URL(kourierUrl())
-  if (target.protocol !== "http:") {
+  const upstream = new URL(kourierUrl())
+  if (upstream.protocol !== "http:") {
     throw new Error(
-      `kourier URL must be http://, got ${target.protocol} (${kourierUrl()})`,
+      `kourier URL must be http://, got ${upstream.protocol} (${kourierUrl()})`,
     )
   }
-  const port = target.port ? Number(target.port) : 80
+  const port = upstream.port ? Number(upstream.port) : 80
 
   // Strip caller-supplied Host so the explicit one wins.
   const cleanCallerHeaders: Record<string, string> = {}
@@ -452,7 +423,7 @@ export async function invokeFunction(
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
-        host: target.hostname,
+        host: upstream.hostname,
         port,
         method,
         path,
