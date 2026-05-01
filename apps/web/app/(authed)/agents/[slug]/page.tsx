@@ -128,12 +128,7 @@ function Details({ agent }: { agent: Agent }) {
             </Link>
           </dd>
         </>
-      ) : (
-        <>
-          <dt className="text-muted-foreground">Hostname</dt>
-          <dd className="font-mono">{agent.hostname}</dd>
-        </>
-      )}
+      ) : null}
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{agent.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
