@@ -106,6 +106,26 @@ export default async function FunctionDetailPage({
       </section>
 
       <section className="space-y-2">
+        <h2 className="text-lg font-semibold">URL</h2>
+        {!fn.exposed && (
+          <p className="text-muted-foreground text-xs">
+            Not exposed — flip Exposure to publish at this address.
+          </p>
+        )}
+        <a
+          href={`https://${fn.hostname}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`inline-flex items-center gap-2 font-mono text-sm ${
+            fn.exposed ? "hover:underline" : "text-muted-foreground"
+          }`}
+        >
+          {`https://${fn.hostname}`}
+          {fn.exposed && <ArrowSquareOut weight="bold" className="size-4" />}
+        </a>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>
@@ -137,27 +157,16 @@ function Details({
       <dd>
         <Badge variant="secondary">{fn.runtime}</Badge>
       </dd>
-      <dt className="text-muted-foreground">Exposure</dt>
-      <dd>{exposeToggle}</dd>
-      {fn.exposed && fn.exposedUrl && (
-        <>
-          <dt className="text-muted-foreground">Public URL</dt>
-          <dd>
-            <a
-              href={fn.exposedUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono hover:underline"
-            >
-              {fn.exposedUrl}
-            </a>
-          </dd>
-        </>
-      )}
       <dt className="text-muted-foreground">Status</dt>
       <dd>
         <Badge variant="outline">{fn.status}</Badge>
       </dd>
+      <dt className="text-muted-foreground">Exposure</dt>
+      <dd>{exposeToggle}</dd>
+      <dt className="text-muted-foreground">Hostname</dt>
+      <dd className="font-mono">{fn.hostname}</dd>
+      <dt className="text-muted-foreground">Namespace</dt>
+      <dd className="font-mono">{fn.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
       <dd>
         <LocalTime iso={fn.createdAt} />

@@ -617,8 +617,14 @@ export type Func = {
   // Whether the function is reachable from outside the cluster at
   // <slug>.fn.<domain>. No auth — public means literally public.
   exposed: boolean
-  // Public URL when `exposed`, otherwise empty string.
+  // The would-be hostname (always populated). Becomes a live URL when
+  // `exposed` flips on; useful preview either way.
+  hostname: string
+  // Full https URL when `exposed`, otherwise empty string.
   exposedUrl: string
+  // Kubernetes namespace ("resource"). Surfaced for parity with the
+  // VM/LB detail pages.
+  namespace: string
   // Web URL into Forgejo. "" when the client isn't configured yet.
   forgejoUrl: string
   createdAt: string

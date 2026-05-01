@@ -19,8 +19,14 @@ export type Func = {
   // outside the cluster. Off by default; toggled by the owner from
   // the detail page. No auth — public means literally public.
   exposed: boolean
-  // Public URL when `exposed`, otherwise empty string.
+  // The hostname Knative + Traefik route to. Always populated (even
+  // when not exposed) so the UI can show the "would-be" address.
+  hostname: string
+  // Full https URL when `exposed`, otherwise empty string.
   exposedUrl: string
+  // Kubernetes namespace this function's resources live in. Constant
+  // ("resource") today, exposed for parity with VM/LB detail pages.
+  namespace: string
   // Web URL into Forgejo, "" when client isn't configured yet.
   forgejoUrl: string
   createdAt: string

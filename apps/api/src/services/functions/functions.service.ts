@@ -22,12 +22,14 @@ import {
   ensureDevService,
   ensureExposeRoute,
   exposedUrl,
+  functionHostname,
   getRuntimeMode,
   invokeFunction,
   productionImageRef,
   setProductionImage,
   syncFunctionCodeConfigMap,
 } from "./function-runtime"
+import { RESOURCE_NS } from "../../vms/vms.service"
 
 // `function-` prefix matches the Forgejo repo name: a function whose
 // slug is `function-abcd1234` lives at `service/function-abcd1234`.
@@ -637,7 +639,9 @@ export class FunctionsService {
       runtime: row.runtime as FunctionRuntime,
       status: "Draft",
       exposed: row.exposed,
+      hostname: functionHostname(row.slug),
       exposedUrl: row.exposed ? exposedUrl(row.slug) : "",
+      namespace: RESOURCE_NS,
       forgejoUrl: this.forgejo.repoWebUrl(row.slug),
       createdAt: row.created_at.toISOString(),
     }

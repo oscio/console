@@ -44,12 +44,19 @@ export function productionImageRef(slug: string, sha: string): string {
   return `${functionImagePrefix()}/${slug}:${sha}`
 }
 
-// Public-URL builder. When `exposed` is on, the function is reachable
-// at this URL through Traefik → Kourier. Mirrors what Knative's
-// domainTemplate is configured to emit so HTTPRoute hostname and
-// Kourier's expected Host header line up.
+// The hostname Traefik routes to, regardless of whether the function
+// is currently exposed. Mirrors what Knative's domainTemplate is
+// configured to emit so HTTPRoute hostname and Kourier's expected
+// Host header line up.
+export function functionHostname(slug: string): string {
+  return `${slug}.${functionDomain()}`
+}
+
+// Public-URL builder. Only meaningful when `exposed` is on; the UI
+// hides the value when off but the helper still returns a stable
+// string so callers don't have to special-case empty.
 export function exposedUrl(slug: string): string {
-  return `https://${slug}.${functionDomain()}`
+  return `https://${functionHostname(slug)}`
 }
 
 // Cluster-internal Kourier endpoint console-api proxies through. The
