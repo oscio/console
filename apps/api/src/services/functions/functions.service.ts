@@ -313,9 +313,10 @@ export class FunctionsService {
 
     const writes = input.files ?? []
     const deletes = input.deletes ?? []
-    if (writes.length === 0 && deletes.length === 0) {
-      return { commitMessage: "" }
-    }
+    // No-op Deploy still re-runs ensureRuntime — useful for backfilling
+    // functions that pre-date the dev-runtime code or recovering from a
+    // missing Knative Service. The Forgejo round-trip is skipped when
+    // there's nothing to commit.
 
     // Reject paths that escape the userFolder — Phase-2 keeps the
     // platform layer (runner / Dockerfile / workflow) un-editable
@@ -387,6 +388,11 @@ export class FunctionsService {
   // Proxy a Test-tab request to the function's dev Knative Service.
   // canAccessFunction (not just owner) so a public function can be
   // exercised by anyone signed in.
+  //
+  // Self-heal: a 404 from Kourier means there's no Knative Service
+  // registered for this Host, which usually means the function was
+  // created before the dev-runtime code shipped. Try ensureRuntime
+  // and retry once before surfacing the 404 to the caller.
   async invoke(
     ownerId: string,
     slug: string,
@@ -404,6 +410,29 @@ export class FunctionsService {
     if (!(await this.fga.canAccessFunction(ownerId, slug))) {
       throw new NotFoundException(`function ${slug} not found`)
     }
+    const first = await invokeFunction(slug, request)
+    if (first.status !== 404 || first.body) return first
+    // 404 with empty body matches Kourier's no-such-host signature —
+    // try to materialise the runtime and retry. If the function is
+    // genuinely returning a 404 of its own, we'd see a non-empty body.
+    try {
+      const owners = await this.fga.listFunctionOwners(slug)
+      if (owners.length === 0) return first
+      const { rows } = await authPool.query<Pick<Row, "runtime">>(
+        `SELECT runtime FROM "function" WHERE slug = $1`,
+        [slug],
+      )
+      const row = rows[0]
+      if (!row) return first
+      await this.ensureRuntime(slug, row.runtime as FunctionRuntime)
+    } catch (err) {
+      this.log.warn(`invoke self-heal ${slug}: ${(err as Error).message}`)
+      return first
+    }
+    // Knative Services take a moment to register routes after create.
+    // Brief delay before retry; if still 404 it isn't going to be
+    // healed by another retry, just return what Kourier said.
+    await new Promise((r) => setTimeout(r, 1500))
     return invokeFunction(slug, request)
   }
 
