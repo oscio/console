@@ -130,11 +130,19 @@ export async function deleteFunctionCodeConfigMap(slug: string): Promise<void> {
 // ----- Knative Service -----------------------------------------------------
 
 // The dev pod mounts the ConfigMap at /app/function so the dev
-// runner picks up edits without a rebuild. Update strategy is
-// GET → replace (PUT) rather than PATCH — the @kubernetes/client-node
-// v1 typed client defaults to application/json-patch+json content
-// type, which expects a JSON Patch array; sending an object body
-// crashes with "cannot unmarshal object into []handlers.jsonPatchOp".
+// runner picks up edits without a rebuild.
+//
+// Update strategy is GET → modify-spec → replace (PUT). Knative's
+// admission webhook treats `metadata.annotations.serving.knative.dev/
+// creator` (and a few siblings) as immutable, so a wholesale replace
+// with a freshly-built body is rejected. Instead we keep the
+// existing object as the base, swap only `spec` + the bits of our
+// `metadata.labels` we care about, and PUT.
+//
+// (Patch with an object body would be cleaner but the
+// @kubernetes/client-node v1 typed client defaults to
+// application/json-patch+json content type, which expects a JSON
+// Patch array.)
 export async function ensureKnativeService(slug: string): Promise<void> {
   const custom = k8sCustom()
   const name = knativeServiceName(slug)
@@ -142,7 +150,15 @@ export async function ensureKnativeService(slug: string): Promise<void> {
 
   const desired = buildKnativeServiceBody({ name, slug, configMap: cm })
 
-  let existing: { metadata?: { resourceVersion?: string } } | null = null
+  type KsvcShape = {
+    metadata?: {
+      resourceVersion?: string
+      labels?: Record<string, string>
+      annotations?: Record<string, string>
+    }
+    spec?: unknown
+  }
+  let existing: KsvcShape | null = null
   try {
     const res = (await custom.getNamespacedCustomObject({
       group: "serving.knative.dev",
@@ -150,21 +166,32 @@ export async function ensureKnativeService(slug: string): Promise<void> {
       namespace: RESOURCE_NS,
       plural: "services",
       name,
-    })) as { metadata?: { resourceVersion?: string } }
+    })) as KsvcShape
     existing = res
   } catch (err) {
     if (!isNotFound(err)) throw err
   }
 
   if (existing) {
-    desired.metadata.resourceVersion = existing.metadata?.resourceVersion
+    const merged = {
+      ...existing,
+      metadata: {
+        ...existing.metadata,
+        labels: {
+          ...(existing.metadata?.labels ?? {}),
+          ...desired.metadata.labels,
+        },
+        // annotations preserved as-is from existing — Knative-managed.
+      },
+      spec: desired.spec,
+    }
     await custom.replaceNamespacedCustomObject({
       group: "serving.knative.dev",
       version: "v1",
       namespace: RESOURCE_NS,
       plural: "services",
       name,
-      body: desired,
+      body: merged,
     })
   } else {
     await custom.createNamespacedCustomObject({
