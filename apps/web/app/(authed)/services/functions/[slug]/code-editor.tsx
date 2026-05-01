@@ -111,6 +111,14 @@ function sortNode(node: TreeNode): void {
 
 // ---- editor ---------------------------------------------------------------
 
+type Lifecycle =
+  | "draft"
+  | "building"
+  | "build-failed"
+  | "deployable"
+  | "up-to-date"
+  | "unknown"
+
 export function CodeEditor({
   initialFiles,
   defaultFile,
@@ -118,20 +126,22 @@ export function CodeEditor({
   saveAction,
   deployAction,
   rootFolder,
+  lifecycle = "unknown",
   height = "480px",
 }: {
   initialFiles: FileEntry[]
   defaultFile: string
   rootFolder: string
   fallbackLanguage: string
-  // Save = commit to Forgejo + sync to dev runtime ConfigMap. Hot
-  // reload, no image build. Used for the editor iteration loop.
   saveAction: (input: SaveInput) => Promise<{ error?: string } | void>
-  // Deploy = swap the Knative Service to the latest built image
-  // (Forgejo Actions builds on push; this just patches the image
-  // ref). When omitted, the Deploy button is hidden — useful for
-  // contexts that don't want to expose the prod path yet.
+  // Deploy = swap the prod Knative Service to the latest built image.
+  // Hidden when omitted.
   deployAction?: () => Promise<{ error?: string } | void>
+  // Lifecycle of the function used to gate Deploy:
+  //   - "draft" / "building" / "build-failed": Deploy disabled
+  //   - "deployable": Deploy enabled
+  //   - "up-to-date": Deploy disabled (already on latest)
+  lifecycle?: Lifecycle
   height?: string
 }) {
   const router = useRouter()
@@ -288,7 +298,7 @@ export function CodeEditor({
           {deployAction && (
             <Button
               size="sm"
-              disabled={pending || deploying || isDirty}
+              disabled={pending || deploying || isDirty || !canDeploy(lifecycle)}
               onClick={() =>
                 startDeployTransition(async () => {
                   setError(null)
@@ -302,13 +312,9 @@ export function CodeEditor({
                   router.refresh()
                 })
               }
-              title={
-                isDirty
-                  ? "Save unsaved changes first"
-                  : "Promote the latest committed code to production (built image, new Knative Revision)"
-              }
+              title={deployTooltip(lifecycle, isDirty)}
             >
-              {deploying ? "Deploying…" : "Deploy"}
+              {deploying ? "Deploying…" : deployLabel(lifecycle)}
             </Button>
           )}
         </div>
@@ -373,6 +379,43 @@ export function CodeEditor({
       />
     </div>
   )
+}
+
+// Gate the Deploy button + label/tooltip on the function's
+// Saved → Building → Deployable → Deployed lifecycle.
+function canDeploy(l: Lifecycle): boolean {
+  return l === "deployable"
+}
+
+function deployLabel(l: Lifecycle): string {
+  switch (l) {
+    case "building":
+      return "Building…"
+    case "build-failed":
+      return "Build failed"
+    case "up-to-date":
+      return "Up to date"
+    default:
+      return "Deploy"
+  }
+}
+
+function deployTooltip(l: Lifecycle, isDirty: boolean): string {
+  if (isDirty) return "Save unsaved changes first"
+  switch (l) {
+    case "draft":
+      return "No build yet — Save to trigger Forgejo Actions"
+    case "building":
+      return "Build in progress; Deploy enables when it finishes"
+    case "build-failed":
+      return "Latest build failed — fix the code and Save again"
+    case "up-to-date":
+      return "Production is already pinned to the latest commit"
+    case "deployable":
+      return "Promote the latest commit's image to production"
+    default:
+      return ""
+  }
 }
 
 // ---- file tree ------------------------------------------------------------

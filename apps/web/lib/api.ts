@@ -743,12 +743,51 @@ export type FunctionInvocationResult = {
 }
 
 export type FunctionRuntimeStatus = {
-  // Dev surface: ConfigMap-mounted, hot-reloads on Save. Always
-  // present once a function has been Saved at least once.
   dev: { exists: boolean; image: string | null }
-  // Prod surface: built image, baked-in code. Only exists after a
-  // successful Deploy.
   prod: { exists: boolean; image: string | null }
+  // Latest commit SHA on main. null when Forgejo isn't reachable.
+  latestSha: string | null
+  // Forgejo Actions latest workflow run for this repo. `behind: true`
+  // means the runner hasn't picked up the most recent commit yet.
+  build: {
+    sha: string
+    status: string
+    behind: boolean
+  } | null
+}
+
+// Lifecycle the UI uses to gate the Deploy button. Computed from
+// runtime + build state.
+export type FunctionLifecycle =
+  | "draft" // no build run found yet
+  | "building" // run for latest sha is in progress (or queued)
+  | "build-failed" // run for latest sha failed/cancelled
+  | "deployable" // build green; latestSha differs from prod
+  | "up-to-date" // build green; prod matches latestSha
+  | "unknown"
+
+export function lifecycleFor(s: FunctionRuntimeStatus): FunctionLifecycle {
+  if (!s.latestSha || !s.build) return "draft"
+  if (s.build.behind) return "building" // runner still catching up
+  const status = s.build.status
+  if (
+    status === "running" ||
+    status === "waiting" ||
+    status === "blocked"
+  )
+    return "building"
+  if (status !== "success") return "build-failed"
+  const prodSha = extractShaFromImage(s.prod.image)
+  if (prodSha && prodSha === s.latestSha) return "up-to-date"
+  return "deployable"
+}
+
+function extractShaFromImage(image: string | null): string | null {
+  if (!image) return null
+  const colon = image.lastIndexOf(":")
+  if (colon === -1) return null
+  const tag = image.slice(colon + 1)
+  return /^[0-9a-f]{40}$/.test(tag) ? tag : null
 }
 
 export async function fetchFunctionRuntime(

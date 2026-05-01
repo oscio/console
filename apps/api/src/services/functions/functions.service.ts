@@ -453,24 +453,97 @@ export class FunctionsService {
         `function ${slug} has no main branch — Save first`,
       )
     }
+    // Confirm the build for this SHA finished successfully before
+    // patching the Knative Service. Otherwise kubelet would land us
+    // in ImagePullBackOff because Harbor doesn't have the image yet.
+    const run = await this.forgejo.getLatestWorkflowRun({
+      org: this.forgejo.functionOrg,
+      repo: slug,
+    })
+    if (!run) {
+      throw new BadRequestException(
+        "build hasn't started yet — Save first to trigger Forgejo Actions, then retry",
+      )
+    }
+    if (run.headSha !== sha) {
+      throw new BadRequestException(
+        `latest commit ${sha.slice(0, 7)} hasn't been built yet — wait for Forgejo Actions and retry`,
+      )
+    }
+    const ok = run.status === "success"
+    const inProgress =
+      run.status === "running" ||
+      run.status === "waiting" ||
+      run.status === "blocked"
+    if (inProgress) {
+      throw new BadRequestException(
+        `build for ${sha.slice(0, 7)} is still ${run.status} — wait and retry`,
+      )
+    }
+    if (!ok) {
+      throw new BadRequestException(
+        `build for ${sha.slice(0, 7)} ${run.status} — fix and Save again`,
+      )
+    }
     const image = productionImageRef(slug, sha)
     await setProductionImage(slug, image)
     return { image, sha }
   }
 
-  // Read both dev and prod surface state. UI uses this to label
-  // which surfaces exist, what image prod is pinned to, etc.
+  // Read the full lifecycle picture: dev/prod Service state + the
+  // latest commit on main + the build status for it. The UI uses
+  // this to label things like "Saved · Building · Deployable" and
+  // to disable Deploy until the build is green.
   async getRuntime(
     ownerId: string,
     slug: string,
   ): Promise<{
     dev: { exists: boolean; image: string | null }
     prod: { exists: boolean; image: string | null }
+    latestSha: string | null
+    build: {
+      sha: string
+      status: string
+      // True when the build's commit is older than main's HEAD —
+      // Forgejo runner hasn't picked up the latest push yet.
+      behind: boolean
+    } | null
   }> {
     if (!(await this.fga.canAccessFunction(ownerId, slug))) {
       throw new NotFoundException(`function ${slug} not found`)
     }
-    return getRuntimeMode(slug)
+    const runtime = await getRuntimeMode(slug)
+    if (!this.forgejo.enabled) {
+      return { ...runtime, latestSha: null, build: null }
+    }
+    const [latestSha, run] = await Promise.all([
+      this.forgejo
+        .getBranchHead({
+          org: this.forgejo.functionOrg,
+          repo: slug,
+          branch: "main",
+        })
+        .catch(() => null),
+      this.forgejo
+        .getLatestWorkflowRun({
+          org: this.forgejo.functionOrg,
+          repo: slug,
+        })
+        .catch(() => null),
+    ])
+    let build: {
+      sha: string
+      status: string
+      behind: boolean
+    } | null = null
+    if (run) {
+      build = {
+        sha: run.headSha,
+        status: run.status,
+        behind: !!latestSha && run.headSha !== latestSha,
+      }
+    }
+    return { ...runtime, latestSha, build }
   }
 
   // Pull the current function/* files from Forgejo and re-publish them

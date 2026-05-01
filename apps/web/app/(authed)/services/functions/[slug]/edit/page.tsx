@@ -5,8 +5,10 @@ import { notFound } from "next/navigation"
 import {
   deployFunction,
   fetchFunctionFiles,
+  fetchFunctionRuntime,
   fetchFunctions,
   invokeFunction,
+  lifecycleFor,
   saveFunctionFiles,
 } from "@/lib/api"
 import { CodeEditor } from "../code-editor"
@@ -32,9 +34,13 @@ export default async function FunctionEditPage({
   const fn = fns.find((f) => f.slug === slug)
   if (!fn) notFound()
 
-  const filesData = await fetchFunctionFiles(cookieHeader, slug).catch(
-    (err: Error) => ({ error: err.message }),
-  )
+  const [filesData, runtime] = await Promise.all([
+    fetchFunctionFiles(cookieHeader, slug).catch((err: Error) => ({
+      error: err.message,
+    })),
+    fetchFunctionRuntime(cookieHeader, slug).catch(() => null),
+  ])
+  const lifecycle = runtime ? lifecycleFor(runtime) : "unknown"
 
   async function saveFilesAction(input: {
     files: { path: string; content: string }[]
@@ -105,6 +111,7 @@ export default async function FunctionEditPage({
                 rootFolder={filesPayload.folder}
                 saveAction={saveFilesAction}
                 deployAction={deployAction}
+                lifecycle={lifecycle}
                 height="100%"
               />
             ) : (
