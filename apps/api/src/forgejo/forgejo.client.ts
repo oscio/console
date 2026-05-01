@@ -52,14 +52,15 @@ export class ForgejoClient {
     throw new Error(`Forgejo ensureOrg(${name}) -> ${r.status}: ${r.text}`)
   }
 
-  // Auto-init creates the README so the repo has a default branch.
-  // Subsequent commits land via /repos/.../contents API. Returns the
-  // clone URL (https) for downstream wiring.
+  // Auto-init creates an initial README + main branch. Subsequent
+  // template files land via writeFile() (which overwrites the auto-init
+  // README). Returns the clone URL (https) for downstream wiring.
   async createOrgRepo(input: {
     org: string
     name: string
     description?: string
     autoInit?: boolean
+    private?: boolean
   }): Promise<{ cloneUrl: string }> {
     const r = await this.request(
       "POST",
@@ -67,10 +68,10 @@ export class ForgejoClient {
       {
         name: input.name,
         description: input.description ?? "",
-        // Public so the in-cluster runner + buildpacks Job can clone
-        // without a token. Visibility on the console side is
-        // FGA-driven, independent of this flag.
-        private: false,
+        // Default false in dev so the unauthenticated cluster runner
+        // can clone. Prod migration will flip this on (per-user auth +
+        // deploy tokens for the runner).
+        private: input.private ?? false,
         auto_init: input.autoInit ?? true,
         default_branch: "main",
       },
@@ -82,6 +83,110 @@ export class ForgejoClient {
     }
     const body = JSON.parse(r.text) as { clone_url?: string }
     return { cloneUrl: body.clone_url ?? "" }
+  }
+
+  // ---- file contents ------------------------------------------------------
+  // Forgejo's contents API takes one file per call and creates a commit
+  // for each. We accept the round-trip cost — repos are tiny (a handful
+  // of files) and this avoids dragging in a lower-level git library.
+
+  async getFileContent(input: {
+    org: string
+    repo: string
+    path: string
+    ref?: string
+  }): Promise<{ content: string; sha: string } | null> {
+    const ref = input.ref ? `?ref=${encodeURIComponent(input.ref)}` : ""
+    const r = await this.request(
+      "GET",
+      `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/contents/${encodeURIComponent(input.path)}${ref}`,
+    )
+    if (r.status === 404) return null
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo getFileContent(${input.org}/${input.repo}:${input.path}) -> ${r.status}: ${r.text}`,
+      )
+    }
+    const body = JSON.parse(r.text) as {
+      content?: string
+      encoding?: string
+      sha?: string
+    }
+    const sha = body.sha ?? ""
+    if (body.encoding !== "base64" || typeof body.content !== "string") {
+      throw new Error(
+        `Forgejo getFileContent: unexpected encoding ${body.encoding ?? "?"}`,
+      )
+    }
+    const content = Buffer.from(body.content, "base64").toString("utf-8")
+    return { content, sha }
+  }
+
+  // Write a file. Auto-detects create vs update — if Forgejo returns
+  // 422 ("file already exists") on POST, the method GETs the current
+  // sha and retries via PUT. Returns the new blob SHA.
+  async writeFile(input: {
+    org: string
+    repo: string
+    path: string
+    content: string
+    message: string
+    branch?: string
+  }): Promise<{ sha: string }> {
+    const url = `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/contents/${encodeURIComponent(input.path)}`
+    const body: Record<string, unknown> = {
+      content: Buffer.from(input.content, "utf-8").toString("base64"),
+      message: input.message,
+    }
+    if (input.branch) body.branch = input.branch
+
+    let r = await this.request("POST", url, body)
+    if (r.status === 201) {
+      const parsed = JSON.parse(r.text) as { content?: { sha?: string } }
+      return { sha: parsed.content?.sha ?? "" }
+    }
+    // File already exists — fetch its sha and retry as PUT.
+    if (r.status === 422 || r.status === 409) {
+      const existing = await this.getFileContent({
+        org: input.org,
+        repo: input.repo,
+        path: input.path,
+        ref: input.branch,
+      })
+      if (!existing) {
+        throw new Error(
+          `Forgejo writeFile fallback: ${input.path} reported conflict but GET returned 404`,
+        )
+      }
+      r = await this.request("PUT", url, { ...body, sha: existing.sha })
+      if (r.status === 200) {
+        const parsed = JSON.parse(r.text) as { content?: { sha?: string } }
+        return { sha: parsed.content?.sha ?? "" }
+      }
+    }
+    throw new Error(
+      `Forgejo writeFile(${input.org}/${input.repo}:${input.path}) -> ${r.status}: ${r.text}`,
+    )
+  }
+
+  // Toggle the repo's visibility flag. Used so prod deployments can
+  // make function repos truly private (today they're always public to
+  // keep the runner unauthenticated; per-user auth lands later).
+  async setRepoVisibility(
+    org: string,
+    repo: string,
+    isPrivate: boolean,
+  ): Promise<void> {
+    const r = await this.request(
+      "PATCH",
+      `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
+      { private: isPrivate },
+    )
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo setRepoVisibility(${org}/${repo}) -> ${r.status}: ${r.text}`,
+      )
+    }
   }
 
   // 404 is fine — already gone is the desired state.

@@ -62,6 +62,28 @@ export class FunctionsController {
     return this.fns.setVisibility(session.user.id, slug, !!body.public)
   }
 
+  @Get(":slug/code")
+  getCode(
+    @Param("slug") slug: string,
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.getCode(session.user.id, slug)
+  }
+
+  @Put(":slug/code")
+  updateCode(
+    @Param("slug") slug: string,
+    @Body() body: { content?: string; message?: string },
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.updateCode(
+      session.user.id,
+      slug,
+      String(body.content ?? ""),
+      body.message,
+    )
+  }
+
   @Patch(":slug")
   async rename(
     @Param("slug") slug: string,

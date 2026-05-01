@@ -682,6 +682,51 @@ export async function renameFunction(
   }
 }
 
+export type FunctionCode = {
+  // Path of the editable file inside the repo, e.g. handler.py.
+  path: string
+  // Monaco language id (e.g. "python", "javascript").
+  language: string
+  // Current contents on the default branch.
+  content: string
+}
+
+export async function fetchFunctionCode(
+  cookieHeader: string,
+  slug: string,
+): Promise<FunctionCode> {
+  const res = await fetch(
+    `${API_URL}/functions/${encodeURIComponent(slug)}/code`,
+    { headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions code fetch failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as FunctionCode
+}
+
+export async function saveFunctionCode(
+  cookieHeader: string,
+  slug: string,
+  content: string,
+  message?: string,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/functions/${encodeURIComponent(slug)}/code`,
+    {
+      method: "PUT",
+      headers: { cookie: cookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ content, message }),
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions code save failed: ${res.status} ${text}`)
+  }
+}
+
 export async function setFunctionVisibility(
   cookieHeader: string,
   slug: string,

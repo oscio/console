@@ -5,13 +5,16 @@ import { notFound } from "next/navigation"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import {
+  fetchFunctionCode,
   fetchFunctions,
   renameFunction,
+  saveFunctionCode,
   setFunctionVisibility,
   type Func,
 } from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
 import { RenameForm } from "@/components/rename-form"
+import { CodeEditor } from "./code-editor"
 import { VisibilityToggle } from "../visibility-toggle"
 
 export default async function FunctionDetailPage({
@@ -31,6 +34,18 @@ export default async function FunctionDetailPage({
   }
   const fn = fns.find((f) => f.slug === slug)
   if (!fn) notFound()
+
+  // Pulling the handler in parallel with the function row would be
+  // nice, but we need to confirm the function exists + is accessible
+  // first to avoid leaking 404 vs 403 distinctions to the unauthorised
+  // caller.
+  let code: Awaited<ReturnType<typeof fetchFunctionCode>> | null = null
+  let codeError: string | null = null
+  try {
+    code = await fetchFunctionCode(cookieHeader, slug)
+  } catch (err) {
+    codeError = (err as Error).message
+  }
 
   async function renameAction(formData: FormData) {
     "use server"
@@ -54,6 +69,17 @@ export default async function FunctionDetailPage({
     revalidatePath("/services/functions")
   }
 
+  async function saveCodeAction(content: string) {
+    "use server"
+    const cookieHeader = (await headers()).get("cookie") ?? ""
+    try {
+      await saveFunctionCode(cookieHeader, slug, content)
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+    revalidatePath(`/services/functions/${slug}`)
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -73,6 +99,26 @@ export default async function FunctionDetailPage({
       </div>
 
       <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Code</h2>
+        {code ? (
+          <CodeEditor
+            initialContent={code.content}
+            language={code.language}
+            path={code.path}
+            saveAction={saveCodeAction}
+          />
+        ) : (
+          <p className="text-destructive text-sm">
+            Couldn't load handler: {codeError ?? "unknown error"}
+          </p>
+        )}
+        <p className="text-muted-foreground text-xs">
+          Edits commit straight to the function repo. Dockerfile + workflow
+          live in the repo only — clone via Forgejo to edit them.
+        </p>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>
@@ -87,9 +133,6 @@ export default async function FunctionDetailPage({
             />
           </CardContent>
         </Card>
-        <p className="text-muted-foreground text-xs">
-          Code lives in Forgejo. Build + deploy pipeline arrives in Phase 2.
-        </p>
       </section>
     </div>
   )
