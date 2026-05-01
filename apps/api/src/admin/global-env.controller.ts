@@ -127,6 +127,11 @@ async function mutateSecret(
 
   if (!existing) {
     if (Object.keys(nextData).length === 0) return
+    // First admin write on a fresh cluster: the `resource` namespace
+    // is created lazily by VmsService/AgentsService on first VM/agent
+    // create, so it may not exist yet here. Create-if-missing keeps
+    // the global-env flow self-sufficient.
+    await ensureNamespace(RESOURCE_NS)
     await core.createNamespacedSecret({
       namespace: RESOURCE_NS,
       body: {
@@ -171,9 +176,38 @@ async function mutateSecret(
   }
 }
 
+async function ensureNamespace(name: string): Promise<void> {
+  const core = k8sCore()
+  try {
+    await core.readNamespace({ name })
+    return
+  } catch (err) {
+    if (!isNotFound(err)) throw err
+  }
+  try {
+    await core.createNamespace({
+      body: {
+        apiVersion: "v1",
+        kind: "Namespace",
+        metadata: {
+          name,
+          labels: { "agent-platform/component": "resource" },
+        },
+      },
+    })
+  } catch (err) {
+    if (!isAlreadyExists(err)) throw err
+  }
+}
+
 function isNotFound(err: unknown): boolean {
   const e = err as { code?: number; statusCode?: number; status?: number }
   return e?.code === 404 || e?.statusCode === 404 || e?.status === 404
+}
+
+function isAlreadyExists(err: unknown): boolean {
+  const e = err as { code?: number; statusCode?: number; status?: number }
+  return e?.code === 409 || e?.statusCode === 409 || e?.status === 409
 }
 
 function isConflict(err: unknown): boolean {
