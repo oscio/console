@@ -52,6 +52,7 @@ const SETTINGS_ITEM: NavItem = {
 
 export function ConsoleSidebar({
   user,
+  branding,
 }: {
   user: {
     name: string | null
@@ -62,6 +63,10 @@ export function ConsoleSidebar({
     isPlatformAdmin?: boolean
     isConsoleAdmin?: boolean
   }
+  branding: {
+    title: string
+    description: string
+  }
 }) {
   const pathname = usePathname()
   const isAdmin = !!(user.isPlatformAdmin || user.isConsoleAdmin)
@@ -70,16 +75,15 @@ export function ConsoleSidebar({
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <div className="bg-sidebar-primary text-sidebar-primary-foreground flex size-8 items-center justify-center rounded-md text-sm font-semibold">
-            C
-          </div>
-          <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-sm font-semibold">Console</span>
+        <div className="flex min-w-0 flex-col px-2 py-1.5 leading-tight group-data-[collapsible=icon]:hidden">
+          <span className="truncate text-sm font-semibold">
+            {branding.title}
+          </span>
+          {branding.description ? (
             <span className="text-muted-foreground truncate text-xs">
-              Agent Platform
+              {branding.description}
             </span>
-          </div>
+          ) : null}
         </div>
       </SidebarHeader>
 

@@ -9,7 +9,7 @@ import {
 import { TooltipProvider } from "@workspace/ui/components/tooltip"
 import { ConsoleSidebar } from "@/components/sidebar/console-sidebar"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { fetchMe } from "@/lib/api"
+import { fetchBranding, fetchMe } from "@/lib/api"
 
 export default async function AuthedLayout({
   children,
@@ -27,7 +27,17 @@ export default async function AuthedLayout({
   // better-auth session has the user identity, but admin status
   // comes from Keycloak groups (platform-admin) and OpenFGA tuples
   // (console-admin) which the api combines.
-  const me = await fetchMe(headerStore.get("cookie") ?? "").catch(() => null)
+  const cookieHeader = headerStore.get("cookie") ?? ""
+  const [me, branding] = await Promise.all([
+    fetchMe(cookieHeader).catch(() => null),
+    fetchBranding(cookieHeader).catch(() => ({
+      color: "",
+      textColor: "",
+      imageUrl: "",
+      title: "Console",
+      description: "",
+    })),
+  ])
 
   return (
     <TooltipProvider>
@@ -39,11 +49,14 @@ export default async function AuthedLayout({
             isPlatformAdmin: me?.isPlatformAdmin ?? false,
             isConsoleAdmin: me?.isConsoleAdmin ?? false,
           }}
+          branding={branding}
         />
         <SidebarInset>
           <header className="flex h-12 items-center gap-2 border-b px-4">
             <SidebarTrigger className="-ml-1" />
-            <span className="text-muted-foreground text-sm">Console</span>
+            <span className="text-muted-foreground text-sm">
+              {branding.title}
+            </span>
             <div className="ml-auto">
               <ThemeToggle />
             </div>
