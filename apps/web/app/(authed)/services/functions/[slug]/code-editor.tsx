@@ -6,6 +6,17 @@ import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Button } from "@workspace/ui/components/button"
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@workspace/ui/components/dialog"
+import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
+import {
   CaretDown,
   CaretRight,
   File as FileIcon,
@@ -57,13 +68,12 @@ function languageForPath(path: string, fallback: string): string {
 type TreeNode =
   | { kind: "file"; path: string }
   | { kind: "dir"; path: string; children: TreeNode[] }
+type DirNode = Extract<TreeNode, { kind: "dir" }>
 
 // Build a folder tree rooted at `rootFolder`. Only paths under that
 // folder are nested in; everything else is dropped. Implicit folders
 // (those that only exist because a file path contains them) get
 // generated as `dir` nodes.
-type DirNode = Extract<TreeNode, { kind: "dir" }>
-
 function buildTree(rootFolder: string, paths: string[]): DirNode {
   const root: DirNode = { kind: "dir", path: rootFolder, children: [] }
   for (const p of paths) {
@@ -82,8 +92,6 @@ function buildTree(rootFolder: string, paths: string[]): DirNode {
         cur.children.push(child)
       }
       if (isLeaf) break
-      // Existing entry might be a `file` if a path collides with a
-      // folder name from another path — skip the rest of this path.
       if (child.kind !== "dir") break
       cur = child
     }
@@ -113,15 +121,9 @@ export function CodeEditor({
 }: {
   initialFiles: FileEntry[]
   defaultFile: string
-  // The user-editable folder root the tree is anchored at — e.g.
-  // "function". New files are created relative to this folder.
   rootFolder: string
-  // Language the runtime declared (e.g. "python"). Files whose
-  // extension we don't recognise fall back to this.
   fallbackLanguage: string
   saveAction: (input: SaveInput) => Promise<{ error?: string } | void>
-  // Total height (header + tree + editor). The editor body fills the
-  // remaining space after the header bar.
   height?: string
 }) {
   const router = useRouter()
@@ -129,16 +131,12 @@ export function CodeEditor({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  // Working set: existing-and-edited content, deleted-existing paths,
-  // newly-created paths. Tracking origin lets us drop "create then
-  // delete" cycles without round-tripping the server.
   const [files, setFiles] = useState<Record<string, FileEntry>>(() =>
     Object.fromEntries(initialFiles.map((f) => [f.path, f])),
   )
   const [originalContent, setOriginalContent] = useState<Record<string, string>>(
     () => Object.fromEntries(initialFiles.map((f) => [f.path, f.content])),
   )
-  // Paths that existed on load and are pending delete on next save.
   const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set())
 
   const [active, setActive] = useState<string>(() => {
@@ -146,7 +144,11 @@ export function CodeEditor({
     return initialFiles[0]?.path ?? ""
   })
 
-  // Visible files = working set minus deletions.
+  // Dialog state — replaces window.prompt / window.confirm so the
+  // create / delete flow stays inside the editor's UI shell.
+  const [newFileOpen, setNewFileOpen] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
   const visiblePaths = useMemo(
     () => Object.keys(files).filter((p) => !deletedPaths.has(p)).sort(),
     [files, deletedPaths],
@@ -162,7 +164,6 @@ export function CodeEditor({
     for (const p of visiblePaths) {
       const original = originalContent[p]
       const current = files[p]?.content ?? ""
-      // New file (no original) counts as dirty.
       if (original === undefined) set.add(p)
       else if (current !== original) set.add(p)
     }
@@ -171,31 +172,18 @@ export function CodeEditor({
 
   const isDirty = dirtyPaths.size > 0 || deletedPaths.size > 0
 
-  function addFile() {
-    const input = window.prompt(
-      `New file path (relative to ${rootFolder}/):`,
-      "",
-    )
-    if (!input) return
-    const trimmed = input.trim().replace(/^\/+/, "")
-    if (!trimmed) return
-    if (trimmed.includes("..")) {
-      setError("Path can't contain '..'")
-      return
-    }
+  function commitNewFile(rawPath: string): string | null {
+    const trimmed = rawPath.trim().replace(/^\/+/, "")
+    if (!trimmed) return "Path is required"
+    if (trimmed.includes("..")) return "Path can't contain '..'"
     const fullPath = `${rootFolder}/${trimmed}`
-    if (files[fullPath]) {
-      setError(`${fullPath} already exists`)
-      setActive(fullPath)
-      return
+    if (files[fullPath] && !deletedPaths.has(fullPath)) {
+      return `${fullPath} already exists`
     }
-    setError(null)
     setFiles((prev) => ({
       ...prev,
       [fullPath]: { path: fullPath, content: "" },
     }))
-    // If the user undelete-recreates by typing the same path, drop it
-    // from the delete set.
     setDeletedPaths((prev) => {
       if (!prev.has(fullPath)) return prev
       const next = new Set(prev)
@@ -203,17 +191,16 @@ export function CodeEditor({
       return next
     })
     setActive(fullPath)
+    return null
   }
 
-  function removeFile(path: string) {
-    if (!window.confirm(`Delete ${path}?`)) return
+  function confirmDelete(path: string) {
     setFiles((prev) => {
       const next = { ...prev }
       delete next[path]
       return next
     })
     if (originalContent[path] !== undefined) {
-      // Existing file — record for server-side delete on save.
       setDeletedPaths((prev) => {
         const next = new Set(prev)
         next.add(path)
@@ -224,14 +211,20 @@ export function CodeEditor({
       const remaining = visiblePaths.filter((p) => p !== path)
       setActive(remaining[0] ?? "")
     }
+    setPendingDelete(null)
   }
 
   const activeFile = active ? files[active] : undefined
-  const language = active ? languageForPath(active, fallbackLanguage) : fallbackLanguage
+  const language = active
+    ? languageForPath(active, fallbackLanguage)
+    : fallbackLanguage
 
   return (
-    <div className="flex flex-col border" style={{ height }}>
-      <div className="bg-muted/40 flex items-center justify-between border-b px-3 py-1.5">
+    <div
+      className="flex min-h-0 min-w-0 flex-col overflow-hidden border"
+      style={{ height }}
+    >
+      <div className="bg-muted/40 flex shrink-0 items-center justify-between border-b px-3 py-1.5">
         <div className="flex items-center gap-2 text-xs">
           <span className="font-mono">{active || "—"}</span>
           {active && dirtyPaths.has(active) && (
@@ -262,8 +255,6 @@ export function CodeEditor({
                   setError(result.error)
                   return
                 }
-                // Successful save → folded changes become the new
-                // "original" baseline; deletes vanish.
                 setOriginalContent((prev) => {
                   const next = { ...prev }
                   for (const w of writes) next[w.path] = w.content
@@ -280,45 +271,63 @@ export function CodeEditor({
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[14rem_1fr]">
-        <FileTree
-          tree={tree}
-          active={active}
-          dirty={dirtyPaths}
-          onSelect={setActive}
-          onAddFile={addFile}
-          onDeleteFile={removeFile}
-        />
-        <div className="min-h-0">
-          {activeFile ? (
-            <Monaco
-              height="100%"
-              path={active}
-              language={language}
-              theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
-              value={activeFile.content}
-              onChange={(v) =>
-                setFiles((prev) => ({
-                  ...prev,
-                  [active]: { path: active, content: v ?? "" },
-                }))
-              }
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                scrollBeyondLastLine: false,
-                renderLineHighlight: "line",
-                tabSize: 2,
-                automaticLayout: true,
-              }}
-            />
-          ) : (
-            <div className="text-muted-foreground flex h-full items-center justify-center text-xs">
-              No file selected. Click + to add one.
-            </div>
-          )}
+      {/* Body lives inside a relatively-positioned container with the
+          editor pinned via inset-0. Pinning takes Monaco out of normal
+          flow so any layout race during sidebar toggles or window
+          resizes can't push it past the box. */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="absolute inset-0 grid grid-cols-[14rem_1fr]">
+          <FileTree
+            tree={tree}
+            active={active}
+            dirty={dirtyPaths}
+            onSelect={setActive}
+            onAddFile={() => setNewFileOpen(true)}
+            onDeleteFile={setPendingDelete}
+          />
+          <div className="min-h-0 min-w-0 overflow-hidden">
+            {activeFile ? (
+              <Monaco
+                height="100%"
+                path={active}
+                language={language}
+                theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
+                value={activeFile.content}
+                onChange={(v) =>
+                  setFiles((prev) => ({
+                    ...prev,
+                    [active]: { path: active, content: v ?? "" },
+                  }))
+                }
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  scrollBeyondLastLine: false,
+                  renderLineHighlight: "line",
+                  tabSize: 2,
+                  automaticLayout: true,
+                }}
+              />
+            ) : (
+              <div className="text-muted-foreground flex h-full items-center justify-center text-xs">
+                No file selected. Click + to add one.
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      <NewFileDialog
+        open={newFileOpen}
+        onOpenChange={setNewFileOpen}
+        rootFolder={rootFolder}
+        onSubmit={commitNewFile}
+      />
+      <DeleteFileDialog
+        path={pendingDelete}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => pendingDelete && confirmDelete(pendingDelete)}
+      />
     </div>
   )
 }
@@ -333,7 +342,7 @@ function FileTree({
   onAddFile,
   onDeleteFile,
 }: {
-  tree: TreeNode
+  tree: DirNode
   active: string
   dirty: Set<string>
   onSelect: (path: string) => void
@@ -341,8 +350,8 @@ function FileTree({
   onDeleteFile: (path: string) => void
 }) {
   return (
-    <div className="bg-muted/20 flex min-h-0 flex-col border-r">
-      <div className="bg-muted/30 flex items-center justify-between border-b px-2 py-1 text-xs">
+    <div className="bg-muted/20 flex min-h-0 min-w-0 flex-col overflow-hidden border-r">
+      <div className="bg-muted/30 flex shrink-0 items-center justify-between border-b px-2 py-1 text-xs">
         <span className="text-muted-foreground font-medium uppercase tracking-wide">
           Files
         </span>
@@ -472,5 +481,128 @@ function TreeNodeView({
         </div>
       )}
     </div>
+  )
+}
+
+// ---- dialogs --------------------------------------------------------------
+
+function NewFileDialog({
+  open,
+  onOpenChange,
+  rootFolder,
+  onSubmit,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  rootFolder: string
+  onSubmit: (path: string) => string | null
+}) {
+  const [path, setPath] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        onOpenChange(o)
+        if (!o) {
+          setPath("")
+          setError(null)
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New file</DialogTitle>
+          <DialogDescription>
+            Path is relative to{" "}
+            <code className="font-mono">{rootFolder}/</code>. Use slashes
+            to put the file inside a subfolder — folders are created on
+            demand.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          id="new-file-form"
+          className="space-y-1.5"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const result = onSubmit(path)
+            if (result) {
+              setError(result)
+              return
+            }
+            setPath("")
+            setError(null)
+            onOpenChange(false)
+          }}
+        >
+          <Label htmlFor="new-file-path">Path</Label>
+          <Input
+            id="new-file-path"
+            autoFocus
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder="handlers/foo.py"
+          />
+          {error && (
+            <p
+              role="alert"
+              className="text-destructive border-destructive/30 bg-destructive/5 border px-3 py-2 text-sm"
+            >
+              {error}
+            </p>
+          )}
+        </form>
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline">Cancel</Button>
+          </DialogClose>
+          <Button form="new-file-form" type="submit">
+            Create
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeleteFileDialog({
+  path,
+  onCancel,
+  onConfirm,
+}: {
+  path: string | null
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Dialog open={path !== null} onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Delete file?</DialogTitle>
+          <DialogDescription>
+            <code className="font-mono break-all">{path}</code>
+            <br />
+            This stages the delete — the file is removed from the repo
+            on the next Deploy.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button
+            variant="outline"
+            className="text-destructive hover:text-destructive"
+            onClick={onConfirm}
+          >
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

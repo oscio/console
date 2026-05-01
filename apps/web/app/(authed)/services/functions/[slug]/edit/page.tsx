@@ -55,32 +55,34 @@ export default async function FunctionEditPage({
   }
 
   return (
-    <div className="space-y-3">
-      <div>
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="shrink-0">
         <Link
           href={`/services/functions/${slug}`}
           className="text-muted-foreground hover:text-foreground text-xs"
         >
           ← Back to {fn.name}
         </Link>
-        <div className="mt-1">
-          <h1 className="text-lg font-semibold">{fn.name}</h1>
-          <p className="text-muted-foreground font-mono text-xs">
-            Editing {filesData?.folder ?? "user"}/ — Dockerfile, runner, and
-            workflow live in the repo (clone via Forgejo to edit).
+        <div className="mt-1 flex items-baseline gap-3">
+          <h1 className="text-base font-semibold">{fn.name}</h1>
+          <p className="text-muted-foreground truncate font-mono text-xs">
+            Editing {filesData?.folder ?? "user"}/ — Dockerfile, runner,
+            workflow live in the repo (clone via Forgejo to edit)
           </p>
         </div>
       </div>
 
       {filesData ? (
-        <CodeEditor
-          initialFiles={filesData.files}
-          defaultFile={filesData.defaultFile}
-          fallbackLanguage={filesData.language}
-          rootFolder={filesData.folder}
-          saveAction={saveFilesAction}
-          height="calc(100vh - 11rem)"
-        />
+        <div className="min-h-0 flex-1">
+          <CodeEditor
+            initialFiles={filesData.files}
+            defaultFile={filesData.defaultFile}
+            fallbackLanguage={filesData.language}
+            rootFolder={filesData.folder}
+            saveAction={saveFilesAction}
+            height="100%"
+          />
+        </div>
       ) : (
         <p className="text-destructive text-sm">
           Couldn't load files: {codeError ?? "unknown error"}
