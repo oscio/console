@@ -44,6 +44,7 @@ export function CodeEditor({
   defaultFile,
   fallbackLanguage,
   saveAction,
+  height = "480px",
 }: {
   initialFiles: FileEntry[]
   defaultFile: string
@@ -53,6 +54,9 @@ export function CodeEditor({
   saveAction: (
     files: FileEntry[],
   ) => Promise<{ error?: string } | void>
+  // Editor body height. Detail-page card uses the default; the
+  // dedicated /edit route passes "calc(100vh - 12rem)".
+  height?: string
 }) {
   const router = useRouter()
   const { resolvedTheme } = useTheme()
@@ -80,7 +84,10 @@ export function CodeEditor({
 
   if (!active) {
     return (
-      <div className="text-muted-foreground border p-6 text-center text-xs">
+      <div
+        className="text-muted-foreground border p-6 text-center text-xs"
+        style={{ height }}
+      >
         No editable files in this function.
       </div>
     )
@@ -133,7 +140,7 @@ export function CodeEditor({
         </div>
       </div>
 
-      <div className="grid grid-cols-[12rem_1fr]">
+      <div className="grid grid-cols-[12rem_1fr]" style={{ height }}>
         <FileTree
           paths={Object.keys(files).sort((a, b) => {
             // Pin defaultFile first, like the API ordering.
@@ -146,7 +153,7 @@ export function CodeEditor({
           onSelect={setActive}
         />
         <Monaco
-          height="480px"
+          height={height}
           path={active}
           language={language}
           theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
