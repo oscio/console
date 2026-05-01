@@ -70,14 +70,6 @@ export class FunctionsController {
     return this.fns.getFiles(session.user.id, slug)
   }
 
-  @Get(":slug/routes")
-  listRoutes(
-    @Param("slug") slug: string,
-    @CurrentSession() session: AppSession,
-  ) {
-    return this.fns.listRoutes(session.user.id, slug)
-  }
-
   @Post(":slug/invoke")
   invoke(
     @Param("slug") slug: string,

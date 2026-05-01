@@ -4,7 +4,6 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import {
   fetchFunctionFiles,
-  fetchFunctionRoutes,
   fetchFunctions,
   invokeFunction,
   saveFunctionFiles,
@@ -32,12 +31,9 @@ export default async function FunctionEditPage({
   const fn = fns.find((f) => f.slug === slug)
   if (!fn) notFound()
 
-  const [filesData, routes] = await Promise.all([
-    fetchFunctionFiles(cookieHeader, slug).catch((err: Error) => ({
-      error: err.message,
-    })),
-    fetchFunctionRoutes(cookieHeader, slug).catch(() => []),
-  ])
+  const filesData = await fetchFunctionFiles(cookieHeader, slug).catch(
+    (err: Error) => ({ error: err.message }),
+  )
 
   async function saveFilesAction(input: {
     files: { path: string; content: string }[]
@@ -103,7 +99,7 @@ export default async function FunctionEditPage({
               </p>
             )
           }
-          test={<TestPanel routes={routes} invokeAction={invokeAction} />}
+          test={<TestPanel invokeAction={invokeAction} />}
         />
       </div>
     </div>

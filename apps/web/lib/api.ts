@@ -733,30 +733,6 @@ export async function saveFunctionFiles(
   }
 }
 
-export type FunctionRouteEntry = {
-  // Full URL path, e.g. "/" or "/foo/bar".
-  path: string
-  // The user-folder file the symbol lives in.
-  file: string
-  // The Python def name.
-  symbol: string
-}
-
-export async function fetchFunctionRoutes(
-  cookieHeader: string,
-  slug: string,
-): Promise<FunctionRouteEntry[]> {
-  const res = await fetch(
-    `${API_URL}/functions/${encodeURIComponent(slug)}/routes`,
-    { headers: { cookie: cookieHeader }, cache: "no-store" },
-  )
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw new Error(`functions routes fetch failed: ${res.status} ${text}`)
-  }
-  return (await res.json()) as FunctionRouteEntry[]
-}
-
 export type FunctionInvocationResult = {
   status: number
   headers: Record<string, string>

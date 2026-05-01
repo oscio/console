@@ -22,7 +22,6 @@ import {
   invokeFunction,
   syncFunctionCodeConfigMap,
 } from "./function-runtime"
-import { parseRoutes, type DiscoveredRoute } from "./routes-parser"
 
 // `function-` prefix matches the Forgejo repo name: a function whose
 // slug is `function-abcd1234` lives at `service/function-abcd1234`.
@@ -373,16 +372,6 @@ export class FunctionsService {
         this.log.warn(`ensureRuntime ${slug}: ${(err as Error).message}`),
     )
     return { commitMessage }
-  }
-
-  // List the routes the dev runner will mount when given the current
-  // function/* contents. Used by the Test tab.
-  async listRoutes(
-    ownerId: string,
-    slug: string,
-  ): Promise<DiscoveredRoute[]> {
-    const filesData = await this.getFiles(ownerId, slug)
-    return parseRoutes(filesData.folder, filesData.files)
   }
 
   // Proxy a Test-tab request to the function's dev Knative Service.

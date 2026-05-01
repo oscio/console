@@ -36,85 +36,129 @@ export type FunctionTemplate = {
   files: TemplateFile[]
 }
 
-const PYTHON_USER_MAIN = `from starlette.responses import JSONResponse
+const PYTHON_USER_MAIN = `"""User handler — Lambda-style entrypoint.
+
+The platform's runner imports this file once on cold start and calls
+\`handler(event, context)\` for every HTTP request.
+
+  event   — dict shaped like AWS API Gateway HTTP API v2
+            (event["requestContext"]["http"]["method"] etc.)
+  context — reserved for future trigger metadata; empty dict for now
+
+Return a dict {statusCode, headers?, body?} and the runner maps it
+back to an HTTP response.
+"""
+import json
 
 
-async def main(request):
-    if request.method == "GET":
-        return JSONResponse(
-            content={"message": "success!"},
-            status_code=200,
-        )
-    elif request.method == "POST":
-        body: dict = await request.json()
-        return JSONResponse(
-            content={"message": f"Received data: {body}"},
-            status_code=200,
-        )
-    return JSONResponse(
-        content={"message": "Method not allowed"},
-        status_code=405,
-    )
+def handler(event, context):
+    method = event["requestContext"]["http"]["method"]
+    if method == "GET":
+        return {"statusCode": 200, "body": json.dumps({"message": "pong"})}
+    if method == "POST":
+        try:
+            payload = json.loads(event.get("body") or "{}")
+        except json.JSONDecodeError:
+            return {"statusCode": 400, "body": json.dumps({"error": "invalid JSON"})}
+        return {"statusCode": 200, "body": json.dumps({"received": payload})}
+    return {"statusCode": 405, "body": json.dumps({"error": "method not allowed"})}
 `
 
-const PYTHON_RUNNER = `"""Function platform runner.
+const PYTHON_RUNNER = `"""Function platform runner — Lambda-style.
 
-Vercel-style routing: each \`.py\` file under \`function/\` exports a
-\`main\` callable that gets mounted at the URL derived from the file
-path. One file = one route; helpers in the same file stay private.
-
-Examples:
-    function/main.py:def main           → /
-    function/foo.py:def main            → /foo
-    function/users/main.py:def main     → /users          (dir index)
-    function/users/list.py:def main     → /users/list
-
-User contract: \`main\` receives a Starlette \`Request\` and returns a
-Starlette \`Response\`. All HTTP methods dispatch to the same handler.
+The user's \`function/main.py\` exports a single \`handler(event, context)\`
+callable. Every HTTP request is wrapped into an API-Gateway-shaped
+event JSON and passed in; whatever the handler returns becomes an
+HTTP response. One repo = one function = one entrypoint.
 """
+import asyncio
 import importlib.util
 from pathlib import Path
 from types import ModuleType
+from typing import Any, Callable
 
 from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.routing import Route
 
 ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
 USER_FOLDER = "function"
+HANDLER_FILE = "main.py"
+HANDLER_NAME = "handler"
 
 
-def _load(path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(path.stem, path)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
+def _load_handler() -> Callable | None:
+    path = Path(USER_FOLDER) / HANDLER_FILE
+    if not path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("user_handler", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod: ModuleType = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod
+    fn = getattr(mod, HANDLER_NAME, None)
+    return fn if callable(fn) else None
 
 
-def _route_path(rel_path: str) -> str:
-    if rel_path == "main":
-        return "/"
-    if rel_path.endswith("/main"):
-        rel_path = rel_path[: -len("/main")]
-    return "/" + rel_path
+HANDLER = _load_handler()
 
 
-def _discover(folder: str) -> list[Route]:
-    routes: list[Route] = []
-    root = Path(folder)
-    for path in sorted(root.rglob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        mod = _load(path)
-        fn = getattr(mod, "main", None)
-        if not callable(fn):
-            continue
-        rel = str(path.relative_to(root).with_suffix(""))
-        routes.append(Route(_route_path(rel), fn, methods=ALL_METHODS))
-    return routes
+async def _invoke(request: Request) -> Response:
+    if HANDLER is None:
+        return Response(
+            f"handler not found: expected {HANDLER_FILE}:{HANDLER_NAME}",
+            status_code=500,
+        )
+    body_bytes = await request.body()
+    body_text = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+    event: dict[str, Any] = {
+        "version": "2.0",
+        "rawPath": request.url.path,
+        "rawQueryString": str(request.url.query) if request.url.query else "",
+        "headers": {k: v for k, v in request.headers.items()},
+        "body": body_text,
+        "isBase64Encoded": False,
+        "requestContext": {
+            "http": {
+                "method": request.method,
+                "path": request.url.path,
+                "sourceIp": request.client.host if request.client else "",
+                "userAgent": request.headers.get("user-agent", ""),
+            },
+        },
+    }
+    result = HANDLER(event, {})
+    if asyncio.iscoroutine(result):
+        result = await result
+    return _to_response(result)
 
 
-app = Starlette(debug=False, routes=_discover(USER_FOLDER))
+def _to_response(result: Any) -> Response:
+    if isinstance(result, Response):
+        return result
+    if isinstance(result, dict) and "statusCode" in result:
+        status = int(result.get("statusCode", 200))
+        headers = result.get("headers") or {}
+        body = result.get("body", "")
+        if not isinstance(body, (str, bytes)):
+            import json
+
+            body = json.dumps(body)
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        return Response(content=body, status_code=status, headers=headers)
+    if isinstance(result, str):
+        return Response(result, status_code=200, media_type="text/plain")
+    import json
+
+    return Response(json.dumps(result), status_code=200, media_type="application/json")
+
+
+app = Starlette(
+    debug=False,
+    routes=[Route("/{path:path}", _invoke, methods=ALL_METHODS)],
+)
 `
 
 const PYTHON_DOCKERFILE = `# Function template — Python 3.12, Starlette runner.
