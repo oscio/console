@@ -46,6 +46,12 @@ spec:
                 name: console-env
             - secretRef:
                 name: openfga-bootstrap
+            # Forgejo admin creds + URLs for the Functions cascade.
+            # Optional — when the Secret is missing the pod still
+            # boots and FunctionsService falls back to DB-only.
+            - secretRef:
+                name: console-forgejo-admin
+                optional: true
           readinessProbe:
             httpGet:
               path: /healthz
