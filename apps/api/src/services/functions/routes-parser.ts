@@ -35,15 +35,17 @@ export function parseRoutes(
     if (!file.path.startsWith(userFolder + "/")) continue
     if (!file.path.endsWith(".py")) continue
     if (file.path.endsWith("/__init__.py")) continue
-    const stem = stemOf(file.path)
-    if (stem === "") continue
+    // Path relative to userFolder with the .py stripped — keeps
+    // subdir info so foo/main.py and foo.py don't collapse together.
+    const rel = file.path.slice(userFolder.length + 1).replace(/\.py$/, "")
+    if (!rel) continue
     DEF_RE.lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = DEF_RE.exec(file.content)) !== null) {
       const symbol = m[1]!
       if (symbol.startsWith("_")) continue
       routes.push({
-        path: routePath(stem, symbol),
+        path: routePath(rel, symbol),
         file: file.path,
         symbol,
       })
@@ -57,19 +59,10 @@ export function parseRoutes(
   return routes
 }
 
-// Filename without extension and without the userFolder prefix —
-// matches the `path.stem` Starlette uses, except for nested files
-// where we keep the directory components so foo/bar.py:def main
-// becomes /foo/bar (matches no Python convention, but works for now —
-// runner will need the same logic if we later support nesting).
-function stemOf(path: string): string {
-  const noExt = path.replace(/\.py$/, "")
-  const slash = noExt.lastIndexOf("/")
-  return slash === -1 ? noExt : noExt.slice(slash + 1)
-}
-
-function routePath(fileStem: string, funcName: string): string {
-  const base = fileStem === "main" ? "" : `/${fileStem}`
-  const suffix = funcName === "main" ? "" : `/${funcName}`
-  return base + suffix || "/"
+// Mirrors the Starlette runner's `_route_path` exactly. Full
+// relative path + symbol name; ONE special case — function/main.py
+// :def main → "/". Anything else is a verbose-but-unambiguous URL.
+function routePath(relPath: string, funcName: string): string {
+  if (relPath === "main" && funcName === "main") return "/"
+  return `/${relPath}/${funcName}`
 }

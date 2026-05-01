@@ -95,10 +95,14 @@ def _load(path: Path) -> ModuleType:
     return mod
 
 
-def _route_path(file_stem: str, func_name: str) -> str:
-    base = "" if file_stem == "main" else f"/{file_stem}"
-    suffix = "" if func_name == "main" else f"/{func_name}"
-    return (base + suffix) or "/"
+def _route_path(rel_path: str, func_name: str) -> str:
+    """rel_path: file path relative to USER_FOLDER, .py stripped.
+
+    Full-path + func name with one exception: function/main.py:def main → "/".
+    """
+    if rel_path == "main" and func_name == "main":
+        return "/"
+    return f"/{rel_path}/{func_name}"
 
 
 def _is_user_handler(fn: Callable, mod: ModuleType) -> bool:
@@ -114,15 +118,17 @@ def _is_user_handler(fn: Callable, mod: ModuleType) -> bool:
 
 def _discover(folder: str) -> list[Route]:
     routes: list[Route] = []
-    for path in sorted(Path(folder).rglob("*.py")):
+    root = Path(folder)
+    for path in sorted(root.rglob("*.py")):
         if path.name == "__init__.py":
             continue
         mod = _load(path)
+        rel = str(path.relative_to(root).with_suffix(""))
         for name, fn in inspect.getmembers(mod, inspect.isfunction):
             if not _is_user_handler(fn, mod):
                 continue
             routes.append(
-                Route(_route_path(path.stem, name), fn, methods=ALL_METHODS),
+                Route(_route_path(rel, name), fn, methods=ALL_METHODS),
             )
     return routes
 
