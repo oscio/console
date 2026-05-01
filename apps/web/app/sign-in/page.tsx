@@ -13,28 +13,37 @@ export default async function SignInPage() {
     branding = { color: "", imageUrl: "", title: "Console", description: "" }
   }
 
-  // Image takes precedence over color when both are set. background-size:
-  // cover keeps the image's ratio while filling the panel — same as
-  // CSS object-fit: cover.
-  const asideStyle: React.CSSProperties = branding.imageUrl
-    ? {
-        backgroundImage: `linear-gradient(rgba(9,9,11,0.16), rgba(9,9,11,0.32)), url(${JSON.stringify(branding.imageUrl)})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }
-    : {
-        backgroundColor: branding.color || "#0f0f11",
-      }
+  // The colour is the always-on background — used by the mobile thin
+  // bar (where a cropped image would just add visual noise) and as a
+  // fallback when no image is set. On sm+ the image, when configured,
+  // sits as an overlay layer with object-cover semantics.
+  const bgColor = branding.color || "#0f0f11"
 
   return (
     <div className="bg-background flex min-h-svh items-center justify-center p-4">
       <div className="bg-card text-card-foreground grid w-full max-w-2xl overflow-hidden border sm:grid-cols-[1fr_1.5fr]">
-        {/* Aside. On mobile this is a thin top bar with just the
-            wordmark — description is hidden because it doesn't fit
-            and the form is the priority. On sm+ it's the left column
-            with both lines. */}
-        <div aria-hidden className="sm:min-h-[28rem]" style={asideStyle}>
-          <div className="p-5">
+        {/* Aside. On mobile a thin top bar with just the wordmark
+            on the configured background colour — description is
+            hidden because it doesn't fit and the form is the
+            priority. On sm+ the left column shows the colour by
+            default, or the image (cropped, ratio preserved) when
+            one is configured. */}
+        <div
+          aria-hidden
+          className="relative sm:min-h-[28rem]"
+          style={{ backgroundColor: bgColor }}
+        >
+          {branding.imageUrl ? (
+            <div
+              className="pointer-events-none absolute inset-0 hidden sm:block"
+              style={{
+                backgroundImage: `linear-gradient(rgba(9,9,11,0.16), rgba(9,9,11,0.32)), url(${JSON.stringify(branding.imageUrl)})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            />
+          ) : null}
+          <div className="relative p-5">
             <div className="text-xl leading-tight font-bold tracking-tight text-white">
               {branding.title}
             </div>
