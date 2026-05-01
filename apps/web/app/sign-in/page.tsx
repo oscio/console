@@ -13,25 +13,35 @@ export default async function SignInPage() {
     branding = { color: "", imageUrl: "", title: "Console", description: "" }
   }
 
-  // The colour is the always-on background — used by the mobile thin
-  // bar (where a cropped image would just add visual noise) and as a
-  // fallback when no image is set. On sm+ the image, when configured,
-  // sits as an overlay layer with object-cover semantics.
-  const bgColor = branding.color || "#0f0f11"
+  // Aside background:
+  //   - admin-set colour → use as-is, white wordmark (admin is
+  //     expected to pick a dark colour; we don't compute luminance)
+  //   - no colour → fall back to `bg-secondary` so the panel flips
+  //     with the system / chosen theme like the rest of the page,
+  //     with `text-foreground` for the wordmark.
+  const useThemedFallback = !branding.color
+  const asideStyle: React.CSSProperties | undefined = branding.color
+    ? { backgroundColor: branding.color }
+    : undefined
+  const wordmarkClass = useThemedFallback
+    ? "text-foreground"
+    : "text-white"
+  const subtitleClass = useThemedFallback
+    ? "text-muted-foreground"
+    : "text-white/85"
 
   return (
     <div className="bg-background flex min-h-svh items-center justify-center p-4">
       <div className="bg-card text-card-foreground grid w-full max-w-2xl overflow-hidden border sm:grid-cols-[1fr_1.5fr]">
         {/* Aside. On mobile a thin top bar with just the wordmark
-            on the configured background colour — description is
-            hidden because it doesn't fit and the form is the
-            priority. On sm+ the left column shows the colour by
-            default, or the image (cropped, ratio preserved) when
-            one is configured. */}
+            on the configured background — description is hidden
+            because it doesn't fit and the form is the priority. On
+            sm+ the image (cropped, ratio preserved) overlays the
+            colour when one is configured. */}
         <div
           aria-hidden
-          className="relative sm:min-h-[28rem]"
-          style={{ backgroundColor: bgColor }}
+          className={`relative sm:min-h-[28rem] ${useThemedFallback ? "bg-secondary" : ""}`}
+          style={asideStyle}
         >
           {branding.imageUrl ? (
             <div
@@ -44,11 +54,15 @@ export default async function SignInPage() {
             />
           ) : null}
           <div className="relative p-5">
-            <div className="text-xl leading-tight font-bold tracking-tight text-white">
+            <div
+              className={`text-xl leading-tight font-bold tracking-tight ${wordmarkClass}`}
+            >
               {branding.title}
             </div>
             {branding.description ? (
-              <div className="mt-2 hidden max-w-xs text-sm leading-relaxed text-white/85 sm:block">
+              <div
+                className={`mt-2 hidden max-w-xs text-sm leading-relaxed sm:block ${subtitleClass}`}
+              >
                 {branding.description}
               </div>
             ) : null}
