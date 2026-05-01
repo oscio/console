@@ -31,16 +31,44 @@ export default async function AgentChatPage({
   // is happy to host many sessions per pod; we surface a simple "one
   // session per visit unless overridden" model for now and add a
   // session switcher in a follow-up.
+  //
+  // Both list + create can throw "agent wrapper unreachable" when the
+  // pod is still booting (zeroclaw gateway takes a few seconds to
+  // bind). Catch those and show a starting-up message instead of a
+  // server-side exception page — the user just opened the chat too
+  // quickly, refresh in a beat is the right answer.
   let sessions = await listAgentSessions(cookieHeader, slug).catch(
     () => [],
   )
   if (sessions.length === 0) {
-    const created = await createAgentSession(cookieHeader, slug, {
-      name: "default",
-    })
-    sessions = [created]
+    try {
+      const created = await createAgentSession(cookieHeader, slug, {
+        name: "default",
+      })
+      sessions = [created]
+    } catch {
+      sessions = []
+    }
   }
-  const sessionId = sessions[0]!.session_id
+  const session = sessions[0]
+  if (!session) {
+    return (
+      <div className="space-y-4">
+        <Link
+          href={`/agents/${slug}`}
+          className="text-muted-foreground hover:text-foreground text-xs"
+        >
+          ← Back to {agent.name}
+        </Link>
+        <h1 className="text-2xl font-semibold">Chat</h1>
+        <p className="text-muted-foreground text-sm">
+          The agent is still booting — its chat wrapper hasn&apos;t
+          come online yet. Wait a few seconds and refresh.
+        </p>
+      </div>
+    )
+  }
+  const sessionId = session.session_id
 
   return (
     <div className="flex h-[calc(100vh-8rem)] flex-col gap-4">
