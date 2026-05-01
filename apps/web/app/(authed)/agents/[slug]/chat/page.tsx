@@ -7,6 +7,7 @@ import {
   listAgentSessions,
 } from "@/lib/api"
 import { ChatView } from "./chat-view"
+import { AutoRefresh } from "@/components/auto-refresh"
 import { CopyableId } from "@/components/copyable-id"
 
 export default async function AgentChatPage({
@@ -54,6 +55,11 @@ export default async function AgentChatPage({
   if (!session) {
     return (
       <div className="space-y-4">
+        {/* Auto-refresh until the wrapper comes online — same hook
+            we use on list/detail pages for transitional states.
+            Polls every 5s while pending, pauses when the tab is
+            hidden, stops once a refresh produces a session. */}
+        <AutoRefresh pending />
         <Link
           href={`/agents/${slug}`}
           className="text-muted-foreground hover:text-foreground text-xs"
@@ -62,8 +68,8 @@ export default async function AgentChatPage({
         </Link>
         <h1 className="text-2xl font-semibold">Chat</h1>
         <p className="text-muted-foreground text-sm">
-          The agent is still booting — its chat wrapper hasn&apos;t
-          come online yet. Wait a few seconds and refresh.
+          The agent is still booting — waiting for its chat wrapper
+          to come online…
         </p>
       </div>
     )
