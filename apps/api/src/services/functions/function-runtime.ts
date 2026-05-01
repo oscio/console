@@ -1,4 +1,5 @@
 import { Logger } from "@nestjs/common"
+import * as http from "node:http"
 import { k8sCore, k8sCustom } from "../../vms/k8s.client"
 import { RESOURCE_NS } from "../../vms/vms.service"
 
@@ -288,9 +289,14 @@ export async function deleteKnativeService(slug: string): Promise<void> {
 // ----- Invoke proxy --------------------------------------------------------
 
 // Forward an HTTP call to the function's Knative Service through
-// Kourier (cluster-internal). We avoid going through Traefik so dev
-// invocations don't need external DNS / TLS — Kourier ClusterIP +
-// Host header rewrite is enough for the in-cluster path.
+// Kourier (cluster-internal). Routing relies on the Host header
+// matching `<ksvc>.<ns>.<domain>`.
+//
+// Why http.request instead of fetch: WHATWG fetch (Node 18+ / undici)
+// treats `Host` as a forbidden header and silently overwrites it with
+// the URL's hostname, which would always resolve to
+// `kourier.kourier-system…` and 404 us out of every Knative route.
+// http.request lets us set Host explicitly.
 export async function invokeFunction(
   slug: string,
   request: {
@@ -306,35 +312,63 @@ export async function invokeFunction(
 }> {
   const host = `${knativeServiceName(slug)}.${RESOURCE_NS}.${functionDomain()}`
   const path = request.path.startsWith("/") ? request.path : `/${request.path}`
-  const url = `${kourierUrl().replace(/\/$/, "")}${path}`
+  const target = new URL(kourierUrl())
+  if (target.protocol !== "http:") {
+    throw new Error(
+      `kourier URL must be http://, got ${target.protocol} (${kourierUrl()})`,
+    )
+  }
+  const port = target.port ? Number(target.port) : 80
 
-  // Default headers + caller-supplied. Force Host so Kourier routes
-  // to the right Knative Service; user-set Host gets ignored.
+  // Strip caller-supplied Host so the explicit one wins.
+  const cleanCallerHeaders: Record<string, string> = {}
+  for (const [k, v] of Object.entries(request.headers ?? {})) {
+    if (k.toLowerCase() === "host") continue
+    cleanCallerHeaders[k] = v
+  }
+  const method = request.method.toUpperCase()
+  const body =
+    method === "GET" || method === "HEAD" ? undefined : (request.body ?? "")
   const headers: Record<string, string> = {
-    ...(request.headers ?? {}),
+    ...cleanCallerHeaders,
     host: host,
-    "X-Forwarded-Host": host,
+    "x-forwarded-host": host,
+    "content-length": String(body ? Buffer.byteLength(body, "utf8") : 0),
   }
 
-  const res = await fetch(url, {
-    method: request.method.toUpperCase(),
-    headers,
-    body:
-      request.method.toUpperCase() === "GET" ||
-      request.method.toUpperCase() === "HEAD"
-        ? undefined
-        : (request.body ?? ""),
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: target.hostname,
+        port,
+        method,
+        path,
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on("data", (c: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c))
+        })
+        res.on("end", () => {
+          const responseHeaders: Record<string, string> = {}
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (Array.isArray(v)) responseHeaders[k] = v.join(", ")
+            else if (typeof v === "string") responseHeaders[k] = v
+          }
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: responseHeaders,
+            body: Buffer.concat(chunks).toString("utf8"),
+          })
+        })
+        res.on("error", reject)
+      },
+    )
+    req.on("error", reject)
+    if (body) req.write(body)
+    req.end()
   })
-  const text = await res.text().catch(() => "")
-  const responseHeaders: Record<string, string> = {}
-  res.headers.forEach((value, key) => {
-    responseHeaders[key] = value
-  })
-  return {
-    status: res.status,
-    headers: responseHeaders,
-    body: text,
-  }
 }
 
 // ----- helpers -------------------------------------------------------------
