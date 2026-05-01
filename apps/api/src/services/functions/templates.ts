@@ -59,26 +59,22 @@ async def main(request):
 
 const PYTHON_RUNNER = `"""Function platform runner.
 
-Auto-mounts every callable defined under \`function/\` as an HTTP route.
-This file is part of the platform template — power users can edit it
-via git, but the console UI only ever exposes \`function/\`.
+Vercel-style routing: each \`.py\` file under \`function/\` exports a
+\`main\` callable that gets mounted at the URL derived from the file
+path. One file = one route; helpers in the same file stay private.
 
-Routing convention (file stem + symbol name):
+Examples:
+    function/main.py:def main           → /
+    function/foo.py:def main            → /foo
+    function/users/main.py:def main     → /users          (dir index)
+    function/users/list.py:def main     → /users/list
 
-  function/main.py:def main         → /
-  function/main.py:def status       → /status
-  function/foo.py:def main          → /foo
-  function/foo.py:def list_items    → /foo/list_items
-
-User contract: each public callable receives a Starlette \`Request\`
-and returns a Starlette \`Response\`. All HTTP methods are dispatched
-to the same handler — branch on \`request.method\` if you care.
+User contract: \`main\` receives a Starlette \`Request\` and returns a
+Starlette \`Response\`. All HTTP methods dispatch to the same handler.
 """
 import importlib.util
-import inspect
 from pathlib import Path
 from types import ModuleType
-from typing import Callable
 
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -95,25 +91,12 @@ def _load(path: Path) -> ModuleType:
     return mod
 
 
-def _route_path(rel_path: str, func_name: str) -> str:
-    """rel_path: file path relative to USER_FOLDER, .py stripped.
-
-    Full-path + func name with one exception: function/main.py:def main → "/".
-    """
-    if rel_path == "main" and func_name == "main":
+def _route_path(rel_path: str) -> str:
+    if rel_path == "main":
         return "/"
-    return f"/{rel_path}/{func_name}"
-
-
-def _is_user_handler(fn: Callable, mod: ModuleType) -> bool:
-    # Skip imports re-exported from other modules and private (\`_\`-prefixed)
-    # helpers. The match-by-module-name check is what filters out e.g.
-    # \`JSONResponse\` reimported from starlette.
-    if fn.__module__ != mod.__name__:
-        return False
-    if fn.__name__.startswith("_"):
-        return False
-    return True
+    if rel_path.endswith("/main"):
+        rel_path = rel_path[: -len("/main")]
+    return "/" + rel_path
 
 
 def _discover(folder: str) -> list[Route]:
@@ -123,13 +106,11 @@ def _discover(folder: str) -> list[Route]:
         if path.name == "__init__.py":
             continue
         mod = _load(path)
+        fn = getattr(mod, "main", None)
+        if not callable(fn):
+            continue
         rel = str(path.relative_to(root).with_suffix(""))
-        for name, fn in inspect.getmembers(mod, inspect.isfunction):
-            if not _is_user_handler(fn, mod):
-                continue
-            routes.append(
-                Route(_route_path(rel, name), fn, methods=ALL_METHODS),
-            )
+        routes.append(Route(_route_path(rel), fn, methods=ALL_METHODS))
     return routes
 
 

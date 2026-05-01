@@ -1,30 +1,28 @@
-// Static parser for the function/*.py user code — derives the same
-// route shapes the Starlette runner builds at import time. Used by:
-//   - GET /functions/:slug/routes   → Test tab populates from this
+// Static parser for function/*.py — derives the same routes the
+// Starlette runner builds at import time. Used by:
+//   GET /functions/:slug/routes   → Test tab populates from this
 //
-// The parser is regex-based. It misses pathological cases (e.g. a
-// `def` inside a triple-quoted string) but those are rare, the cost
-// of getting them wrong is low (one ghost route in the Test UI), and
-// we'd rather not pull a Python AST package into a Node service.
+// The parser is regex-based. Vercel-style routing means we only
+// emit one route per file (the file's `main` callable); we don't
+// care about other top-level defs.
 
 export type DiscoveredRoute = {
-  // Full URL path, mirroring runner _route_path():
-  //   function/main.py:def main         → "/"
-  //   function/main.py:def status       → "/status"
-  //   function/foo.py:def main          → "/foo"
-  //   function/foo.py:def list_items    → "/foo/list_items"
+  // Full URL path:
+  //   function/main.py            → "/"
+  //   function/foo.py             → "/foo"
+  //   function/users/main.py      → "/users"          (dir index)
+  //   function/users/list.py      → "/users/list"
   path: string
-  // File the function lives in (`function/main.py` etc.) and the
-  // symbol name. Used by the UI to label routes and to deep-link
-  // back into the editor.
+  // The user-folder file the symbol lives in, and the always-`main`
+  // entrypoint name. Symbol stays in the type so the UI can keep
+  // labeling routes by `<file>:<symbol>` for clarity.
   file: string
-  symbol: string
+  symbol: "main"
 }
 
-// Matches top-level `def name(` or `async def name(`. Skips `_`-prefixed
-// names (private convention). The leading `^` anchors to start-of-line
-// in MULTILINE mode so we don't match nested defs.
-const DEF_RE = /^(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9_]*)\s*\(/gm
+// Top-level `def main(` or `async def main(`. MULTILINE so the `^`
+// matches start-of-line; we don't want to mount nested defs.
+const MAIN_DEF_RE = /^(?:async\s+)?def\s+main\s*\(/m
 
 export function parseRoutes(
   userFolder: string,
@@ -35,21 +33,14 @@ export function parseRoutes(
     if (!file.path.startsWith(userFolder + "/")) continue
     if (!file.path.endsWith(".py")) continue
     if (file.path.endsWith("/__init__.py")) continue
-    // Path relative to userFolder with the .py stripped — keeps
-    // subdir info so foo/main.py and foo.py don't collapse together.
+    if (!MAIN_DEF_RE.test(file.content)) continue
     const rel = file.path.slice(userFolder.length + 1).replace(/\.py$/, "")
     if (!rel) continue
-    DEF_RE.lastIndex = 0
-    let m: RegExpExecArray | null
-    while ((m = DEF_RE.exec(file.content)) !== null) {
-      const symbol = m[1]!
-      if (symbol.startsWith("_")) continue
-      routes.push({
-        path: routePath(rel, symbol),
-        file: file.path,
-        symbol,
-      })
-    }
+    routes.push({
+      path: routePath(rel),
+      file: file.path,
+      symbol: "main",
+    })
   }
   // Stable order: shorter paths first, alpha within same length.
   routes.sort((a, b) => {
@@ -59,10 +50,11 @@ export function parseRoutes(
   return routes
 }
 
-// Mirrors the Starlette runner's `_route_path` exactly. Full
-// relative path + symbol name; ONE special case — function/main.py
-// :def main → "/". Anything else is a verbose-but-unambiguous URL.
-function routePath(relPath: string, funcName: string): string {
-  if (relPath === "main" && funcName === "main") return "/"
-  return `/${relPath}/${funcName}`
+// Mirrors the Starlette runner's `_route_path` exactly. Strip the
+// trailing `main` segment (the dir's index) so e.g. function/users/
+// main.py becomes /users.
+function routePath(relPath: string): string {
+  if (relPath === "main") return "/"
+  if (relPath.endsWith("/main")) return "/" + relPath.slice(0, -"/main".length)
+  return "/" + relPath
 }
