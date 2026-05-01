@@ -22,6 +22,16 @@ async function ensureSchema(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     INSERT INTO "branding" (id) VALUES (1) ON CONFLICT DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS "function" (
+      slug text PRIMARY KEY,
+      owner_id text NOT NULL,
+      name text NOT NULL,
+      runtime text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS function_owner_idx ON "function"(owner_id);
   `)
 }
 

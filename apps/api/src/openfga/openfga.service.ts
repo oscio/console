@@ -100,6 +100,9 @@ export class OpenFgaService implements OnModuleInit {
   async listAccessibleAgents(userId: string): Promise<string[]> {
     return this.listObjects(userId, "can_access", "agent")
   }
+  async listAccessibleFunctions(userId: string): Promise<string[]> {
+    return this.listObjects(userId, "can_access", "function")
+  }
 
   // ---- Console-admin convenience -----------------------------------------
   // Note: there is intentionally no platform-admin equivalent. Platform-admin
@@ -258,6 +261,33 @@ export class OpenFgaService implements OnModuleInit {
     return this.check(userKey(userId), "can_access", lbKey(slug))
   }
 
+  // ---- Function ownership ------------------------------------------------
+  // Phase 1: tuple is the only ACL surface (metadata-only). Same shape as
+  // VMs/agents so a future runtime gate (per-function URL) can reuse it.
+
+  async grantFunctionOwner(slug: string, userId: string): Promise<void> {
+    await this.write([
+      { user: userKey(userId), relation: "owner", object: functionKey(slug) },
+    ])
+  }
+
+  async revokeFunctionOwner(slug: string, userId: string): Promise<void> {
+    await this.deleteTuples([
+      { user: userKey(userId), relation: "owner", object: functionKey(slug) },
+    ])
+  }
+
+  async listFunctionOwners(slug: string): Promise<string[]> {
+    const subjects = await this.listSubjects("owner", functionKey(slug))
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async canAccessFunction(userId: string, slug: string): Promise<boolean> {
+    return this.check(userKey(userId), "can_access", functionKey(slug))
+  }
+
   // -------------------------------------------------------------------------
 
   private async post(path: string, body: unknown): Promise<any> {
@@ -292,6 +322,10 @@ export function volumeKey(slug: string): string {
 
 export function lbKey(slug: string): string {
   return `loadbalancer:${slug}`
+}
+
+export function functionKey(slug: string): string {
+  return `function:${slug}`
 }
 
 async function readDevEnvFile(path: string): Promise<Record<string, string>> {

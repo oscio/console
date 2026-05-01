@@ -599,6 +599,85 @@ export async function renameLoadBalancer(
   }
 }
 
+// Functions (Services > Functions). Phase-1 stub: metadata-only,
+// no runtime wired yet. Slug is `fn-<8 hex>`, status is always
+// "Draft" until runtime lands.
+
+export const FUNCTION_RUNTIMES = ["node20", "python3.12"] as const
+export type FunctionRuntime = (typeof FUNCTION_RUNTIMES)[number]
+export type FunctionStatus = "Draft"
+
+export type Func = {
+  id: string
+  slug: string
+  name: string
+  owner: string
+  runtime: FunctionRuntime
+  status: FunctionStatus
+  createdAt: string
+}
+
+export async function fetchFunctions(
+  cookieHeader: string,
+): Promise<Func[] | null> {
+  const res = await fetch(`${API_URL}/functions`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) throw new Error(`functions list failed: ${res.status}`)
+  return (await res.json()) as Func[]
+}
+
+export async function createFunction(
+  cookieHeader: string,
+  input: { name: string; runtime: FunctionRuntime },
+): Promise<Func> {
+  const res = await fetch(`${API_URL}/functions`, {
+    method: "POST",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Func
+}
+
+export async function deleteFunction(
+  cookieHeader: string,
+  slug: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/functions/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions delete failed: ${res.status} ${text}`)
+  }
+}
+
+export async function renameFunction(
+  cookieHeader: string,
+  slug: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/functions/${encodeURIComponent(slug)}`, {
+    method: "PATCH",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions rename failed: ${res.status} ${text}`)
+  }
+}
+
 // Global agent env (cluster-wide Secret keyed by env-var name).
 // The api returns plain values for admins so the settings UI can
 // show what's currently stored. Endpoint is admin-gated.

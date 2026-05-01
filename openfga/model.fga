@@ -45,3 +45,11 @@ type agent
   relations
     define owner: [user]
     define can_access: owner
+
+# Function ownership (Services > Functions). Phase 1 is metadata-only
+# in Postgres; same `owner`/`can_access` shape so the runtime path
+# (Knative/etc.) can layer on top later without an FGA migration.
+type function
+  relations
+    define owner: [user]
+    define can_access: owner

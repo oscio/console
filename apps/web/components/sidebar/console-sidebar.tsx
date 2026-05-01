@@ -6,6 +6,7 @@ import {
   Database,
   Gauge,
   IdentificationCard,
+  Lightning,
   Network,
   Robot,
   Stack,
@@ -42,6 +43,10 @@ const RESOURCES: NavItem[] = [
   { href: "/volumes", label: "Volumes", icon: Database },
   { href: "/loadbalancers", label: "Load Balancers", icon: Network },
   { href: "/agents", label: "Agents", icon: Robot },
+]
+
+const SERVICES: NavItem[] = [
+  { href: "/services/functions", label: "Functions", icon: Lightning },
 ]
 
 const SETTINGS_ITEM: NavItem = {
@@ -104,6 +109,17 @@ export function ConsoleSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               {RESOURCES.map((item) => (
+                <NavLink key={item.href} item={item} pathname={pathname} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Services</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {SERVICES.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </SidebarMenu>
