@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common"
 import { randomBytes } from "node:crypto"
 import { authPool } from "@workspace/auth"
+import { ForgejoClient } from "../../forgejo/forgejo.client"
 import { OpenFgaService } from "../../openfga/openfga.service"
 import {
   CreateFunctionInput,
@@ -13,11 +15,11 @@ import {
   FunctionRuntime,
 } from "./functions.types"
 
-// `fn-` prefix to keep slugs distinguishable from agents/vms in mixed
-// log lines and to leave room for runtime-specific suffixes later
-// (e.g. `fn-<slug>-rev-1`). 8 hex chars matches sibling resources.
+// `function-` prefix matches the Forgejo repo name: a function whose
+// slug is `function-abcd1234` lives at `service/function-abcd1234`.
+// Single identifier, single mental model.
 function randomSlug(): string {
-  return `fn-${randomBytes(4).toString("hex")}`
+  return `function-${randomBytes(4).toString("hex")}`
 }
 
 type Row = {
@@ -28,39 +30,27 @@ type Row = {
   created_at: Date
 }
 
-function toFunc(row: Row): Func {
-  return {
-    id: row.slug,
-    slug: row.slug,
-    name: row.name,
-    owner: row.owner_id,
-    runtime: row.runtime as FunctionRuntime,
-    status: "Draft",
-    createdAt: row.created_at.toISOString(),
-  }
-}
-
 @Injectable()
 export class FunctionsService {
-  constructor(private readonly fga: OpenFgaService) {}
+  private readonly log = new Logger(FunctionsService.name)
+  constructor(
+    private readonly fga: OpenFgaService,
+    private readonly forgejo: ForgejoClient,
+  ) {}
 
-  // Admin-only path: dump every row. Sibling listAll on agents/vms is
-  // a k8s scan; here it's just SELECT * because Postgres is the only
-  // source of truth in Phase 1.
+  // listAll — admin path. No FGA filter, no visibility check.
   async listAll(): Promise<Func[]> {
     const { rows } = await authPool.query<Row>(
       `SELECT slug, owner_id, name, runtime, created_at
          FROM "function"
         ORDER BY created_at DESC`,
     )
-    return rows.map(toFunc)
+    return Promise.all(rows.map((r) => this.toFunc(r)))
   }
 
   async listForOwner(ownerId: string): Promise<Func[]> {
-    // Mirrors VMs/agents: ask FGA which slugs the user can_access,
-    // then read those rows. Avoids a `WHERE owner_id = $1` scan that
-    // would silently drift if we ever add shared functions (editor
-    // role on the model, etc.).
+    // listObjects with `can_access` returns owned + public via the
+    // viewer:[user, user:*] union — no DB-side visibility filter.
     const slugs = await this.fga.listAccessibleFunctions(ownerId)
     if (slugs.length === 0) return []
     const { rows } = await authPool.query<Row>(
@@ -70,7 +60,7 @@ export class FunctionsService {
         ORDER BY created_at DESC`,
       [slugs],
     )
-    return rows.map(toFunc)
+    return Promise.all(rows.map((r) => this.toFunc(r)))
   }
 
   async get(ownerId: string, slug: string): Promise<Func> {
@@ -85,7 +75,7 @@ export class FunctionsService {
     )
     const row = rows[0]
     if (!row) throw new NotFoundException(`function ${slug} not found`)
-    return toFunc(row)
+    return this.toFunc(row)
   }
 
   async create(ownerId: string, input: CreateFunctionInput): Promise<Func> {
@@ -100,14 +90,37 @@ export class FunctionsService {
       )
     }
     const slug = randomSlug()
+    const isPublic = !!input.public
 
-    // Grant FGA tuple before the DB insert. If the insert fails we'll
-    // have a dangling tuple — but the alternative (dangling row, no
-    // tuple) is worse because the user can't see it to delete. The
-    // tuple alone is harmless because /functions list reads the row,
-    // not the tuple.
-    await this.fga.grantFunctionOwner(slug, ownerId)
+    // 1. Forgejo repo first. If we created the FGA tuple/DB row first
+    // and Forgejo failed, the user would see a function in the list
+    // with no repo behind it. Failing on Forgejo upfront keeps state
+    // coherent — DB+FGA never get ahead of the repo.
+    if (this.forgejo.enabled) {
+      await this.forgejo.ensureOrg(this.forgejo.functionOrg)
+      await this.forgejo.createOrgRepo({
+        org: this.forgejo.functionOrg,
+        name: slug,
+        description: name,
+      })
+    } else {
+      this.log.warn(
+        `Forgejo client not configured — creating function ${slug} without a repo`,
+      )
+    }
 
+    // 2. FGA owner tuple. Must precede the row insert so any reader
+    // that races us through listObjects either sees nothing (tuple
+    // not yet written) or the full pair (tuple + row).
+    try {
+      await this.fga.grantFunctionOwner(slug, ownerId)
+      if (isPublic) await this.fga.grantFunctionPublic(slug)
+    } catch (err) {
+      await this.cleanupOnCreateError(slug, ownerId)
+      throw err
+    }
+
+    // 3. Postgres row. On failure we rewind FGA + Forgejo.
     try {
       const { rows } = await authPool.query<Row>(
         `INSERT INTO "function" (slug, owner_id, name, runtime)
@@ -115,9 +128,9 @@ export class FunctionsService {
          RETURNING slug, owner_id, name, runtime, created_at`,
         [slug, ownerId, name, input.runtime],
       )
-      return toFunc(rows[0]!)
+      return this.toFunc(rows[0]!, isPublic)
     } catch (err) {
-      await this.fga.revokeFunctionOwner(slug, ownerId).catch(() => {})
+      await this.cleanupOnCreateError(slug, ownerId)
       throw err
     }
   }
@@ -128,7 +141,9 @@ export class FunctionsService {
     if (name.length > 200) {
       throw new BadRequestException("name must be 200 characters or fewer")
     }
-    if (!(await this.fga.canAccessFunction(ownerId, slug))) {
+    // Owner-only — viewer permission isn't enough to rename.
+    const owners = await this.fga.listFunctionOwners(slug)
+    if (!owners.includes(ownerId)) {
       throw new NotFoundException(`function ${slug} not found`)
     }
     const result = await authPool.query(
@@ -140,17 +155,88 @@ export class FunctionsService {
     }
   }
 
+  async setVisibility(
+    ownerId: string,
+    slug: string,
+    isPublic: boolean,
+  ): Promise<{ public: boolean }> {
+    const owners = await this.fga.listFunctionOwners(slug)
+    if (!owners.includes(ownerId)) {
+      throw new NotFoundException(`function ${slug} not found`)
+    }
+    const wasPublic = await this.fga.isFunctionPublic(slug)
+    if (isPublic && !wasPublic) {
+      await this.fga.grantFunctionPublic(slug)
+    } else if (!isPublic && wasPublic) {
+      await this.fga.revokeFunctionPublic(slug)
+    }
+    return { public: isPublic }
+  }
+
   async delete(ownerId: string, slug: string): Promise<void> {
-    if (!(await this.fga.canAccessFunction(ownerId, slug))) {
+    const owners = await this.fga.listFunctionOwners(slug)
+    if (!owners.includes(ownerId)) {
       throw new NotFoundException(`function ${slug} not found`)
     }
     await authPool.query(`DELETE FROM "function" WHERE slug = $1`, [slug])
-    // Best-effort tuple cleanup. Any other owner (group sharing,
-    // editor role) would be torn down here once those exist; for now
-    // there's only the single owner relation.
-    const owners = await this.fga.listFunctionOwners(slug)
+    if (await this.fga.isFunctionPublic(slug)) {
+      await this.fga.revokeFunctionPublic(slug).catch(() => {})
+    }
     for (const uid of owners) {
       await this.fga.revokeFunctionOwner(slug, uid).catch(() => {})
+    }
+    if (this.forgejo.enabled) {
+      await this.forgejo
+        .deleteRepo(this.forgejo.functionOrg, slug)
+        .catch((err) => this.log.error(`Forgejo delete ${slug}: ${err}`))
+    }
+  }
+
+  // Inverse of create()'s side effects up to but not including the
+  // failed step. Best-effort: errors during cleanup are logged, not
+  // rethrown, because the caller already has a primary error.
+  private async cleanupOnCreateError(
+    slug: string,
+    ownerId: string,
+  ): Promise<void> {
+    if (this.forgejo.enabled) {
+      await this.forgejo
+        .deleteRepo(this.forgejo.functionOrg, slug)
+        .catch((err) =>
+          this.log.warn(`cleanupOnCreateError repo ${slug}: ${err}`),
+        )
+    }
+    await this.fga
+      .revokeFunctionOwner(slug, ownerId)
+      .catch((err) =>
+        this.log.warn(`cleanupOnCreateError fga owner ${slug}: ${err}`),
+      )
+    if (await this.fga.isFunctionPublic(slug).catch(() => false)) {
+      await this.fga
+        .revokeFunctionPublic(slug)
+        .catch((err) =>
+          this.log.warn(`cleanupOnCreateError fga public ${slug}: ${err}`),
+        )
+    }
+  }
+
+  // Pre-fetched isPublic flag avoids a second FGA round-trip when the
+  // caller already has it (e.g. right after a setVisibility).
+  private async toFunc(row: Row, knownPublic?: boolean): Promise<Func> {
+    const isPublic =
+      knownPublic !== undefined
+        ? knownPublic
+        : await this.fga.isFunctionPublic(row.slug).catch(() => false)
+    return {
+      id: row.slug,
+      slug: row.slug,
+      name: row.name,
+      owner: row.owner_id,
+      runtime: row.runtime as FunctionRuntime,
+      status: "Draft",
+      public: isPublic,
+      forgejoUrl: this.forgejo.repoWebUrl(row.slug),
+      createdAt: row.created_at.toISOString(),
     }
   }
 }

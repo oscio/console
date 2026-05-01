@@ -599,9 +599,9 @@ export async function renameLoadBalancer(
   }
 }
 
-// Functions (Services > Functions). Phase-1 stub: metadata-only,
-// no runtime wired yet. Slug is `fn-<8 hex>`, status is always
-// "Draft" until runtime lands.
+// Functions (Services > Functions). Phase-2: each function is backed
+// by a Forgejo repo under the `service` org; visibility (public/
+// private) is FGA-driven via a `user:* viewer` wildcard tuple.
 
 export const FUNCTION_RUNTIMES = ["node20", "python3.12"] as const
 export type FunctionRuntime = (typeof FUNCTION_RUNTIMES)[number]
@@ -614,6 +614,10 @@ export type Func = {
   owner: string
   runtime: FunctionRuntime
   status: FunctionStatus
+  // True when anyone signed-in can read; owner can still rename/delete.
+  public: boolean
+  // Web URL into Forgejo. "" when the client isn't configured yet.
+  forgejoUrl: string
   createdAt: string
 }
 
@@ -631,7 +635,7 @@ export async function fetchFunctions(
 
 export async function createFunction(
   cookieHeader: string,
-  input: { name: string; runtime: FunctionRuntime },
+  input: { name: string; runtime: FunctionRuntime; public?: boolean },
 ): Promise<Func> {
   const res = await fetch(`${API_URL}/functions`, {
     method: "POST",
@@ -675,6 +679,26 @@ export async function renameFunction(
   if (!res.ok) {
     const text = await res.text().catch(() => "")
     throw new Error(`functions rename failed: ${res.status} ${text}`)
+  }
+}
+
+export async function setFunctionVisibility(
+  cookieHeader: string,
+  slug: string,
+  isPublic: boolean,
+): Promise<void> {
+  const res = await fetch(
+    `${API_URL}/functions/${encodeURIComponent(slug)}/visibility`,
+    {
+      method: "PUT",
+      headers: { cookie: cookieHeader, "content-type": "application/json" },
+      body: JSON.stringify({ public: isPublic }),
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions visibility put failed: ${res.status} ${text}`)
   }
 }
 

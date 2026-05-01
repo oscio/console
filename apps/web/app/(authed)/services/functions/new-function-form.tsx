@@ -32,6 +32,7 @@ export function NewFunctionForm({ action }: { action: Action }) {
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [runtime, setRuntime] = useState<FunctionRuntime>("node20")
+  const [visibility, setVisibility] = useState<"private" | "public">("private")
 
   return (
     <Dialog
@@ -98,6 +99,26 @@ export function NewFunctionForm({ action }: { action: Action }) {
                     {r}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
+            id="fn-visibility"
+            label="Visibility"
+            hint="Public functions are readable by every signed-in user. Toggle later from the detail page."
+          >
+            <input type="hidden" name="visibility" value={visibility} />
+            <Select
+              value={visibility}
+              onValueChange={(v) => setVisibility(v as "private" | "public")}
+            >
+              <SelectTrigger id="fn-visibility" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="private">Private</SelectItem>
+                <SelectItem value="public">Public</SelectItem>
               </SelectContent>
             </Select>
           </Field>

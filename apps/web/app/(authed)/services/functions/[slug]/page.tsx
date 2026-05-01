@@ -3,17 +3,16 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { Badge } from "@workspace/ui/components/badge"
-import {
-  Card,
-  CardContent,
-} from "@workspace/ui/components/card"
+import { Card, CardContent } from "@workspace/ui/components/card"
 import {
   fetchFunctions,
   renameFunction,
+  setFunctionVisibility,
   type Func,
 } from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
 import { RenameForm } from "@/components/rename-form"
+import { VisibilityToggle } from "../visibility-toggle"
 
 export default async function FunctionDetailPage({
   params,
@@ -47,6 +46,14 @@ export default async function FunctionDetailPage({
     revalidatePath("/services/functions")
   }
 
+  async function visibilityAction(isPublic: boolean) {
+    "use server"
+    const cookieHeader = (await headers()).get("cookie") ?? ""
+    await setFunctionVisibility(cookieHeader, slug, isPublic)
+    revalidatePath(`/services/functions/${slug}`)
+    revalidatePath("/services/functions")
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,7 +65,9 @@ export default async function FunctionDetailPage({
         </Link>
         <div className="mt-2 flex items-center gap-3">
           <RenameForm initialName={fn.name} action={renameAction} />
-          <Badge variant="outline">{fn.status}</Badge>
+          <Badge variant={fn.public ? "default" : "outline"}>
+            {fn.public ? "Public" : "Private"}
+          </Badge>
         </div>
         <p className="text-muted-foreground font-mono text-xs">{fn.slug}</p>
       </div>
@@ -67,18 +76,32 @@ export default async function FunctionDetailPage({
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>
-            <Details fn={fn} />
+            <Details
+              fn={fn}
+              visibilityToggle={
+                <VisibilityToggle
+                  initial={fn.public}
+                  action={visibilityAction}
+                />
+              }
+            />
           </CardContent>
         </Card>
         <p className="text-muted-foreground text-xs">
-          Code upload, triggers, and invoke URL arrive in the runtime phase.
+          Code lives in Forgejo. Build + deploy pipeline arrives in Phase 2.
         </p>
       </section>
     </div>
   )
 }
 
-function Details({ fn }: { fn: Func }) {
+function Details({
+  fn,
+  visibilityToggle,
+}: {
+  fn: Func
+  visibilityToggle: React.ReactNode
+}) {
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
       <dt className="text-muted-foreground">ID</dt>
@@ -87,10 +110,27 @@ function Details({ fn }: { fn: Func }) {
       <dd>
         <Badge variant="secondary">{fn.runtime}</Badge>
       </dd>
+      <dt className="text-muted-foreground">Visibility</dt>
+      <dd>{visibilityToggle}</dd>
       <dt className="text-muted-foreground">Status</dt>
       <dd>
         <Badge variant="outline">{fn.status}</Badge>
       </dd>
+      {fn.forgejoUrl && (
+        <>
+          <dt className="text-muted-foreground">Code</dt>
+          <dd>
+            <a
+              href={fn.forgejoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:underline"
+            >
+              Open in Forgejo →
+            </a>
+          </dd>
+        </>
+      )}
       <dt className="text-muted-foreground">Created</dt>
       <dd>
         <LocalTime iso={fn.createdAt} />

@@ -25,9 +25,10 @@ async function createFunctionAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
   const runtime = String(formData.get("runtime") ?? "node20") as FunctionRuntime
+  const isPublic = String(formData.get("visibility") ?? "private") === "public"
   if (!name) return { error: "name is required" }
   try {
-    await createFunction(cookieHeader, { name, runtime })
+    await createFunction(cookieHeader, { name, runtime, public: isPublic })
   } catch (err) {
     return { error: (err as Error).message }
   }
@@ -72,6 +73,7 @@ export default async function FunctionsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>ID</TableHead>
                 <TableHead>Runtime</TableHead>
+                <TableHead>Visibility</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -93,6 +95,11 @@ export default async function FunctionsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{fn.runtime}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={fn.public ? "default" : "outline"}>
+                      {fn.public ? "Public" : "Private"}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{fn.status}</Badge>
@@ -119,7 +126,7 @@ export default async function FunctionsPage() {
               {fns.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-muted-foreground py-6 text-center"
                   >
                     No functions yet.

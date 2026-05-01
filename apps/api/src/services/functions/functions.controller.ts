@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from "@nestjs/common"
 import { type AppSession } from "@workspace/auth"
@@ -48,7 +49,17 @@ export class FunctionsController {
     return this.fns.create(session.user.id, {
       name: (body.name ?? "").toString(),
       runtime: (body.runtime ?? "node20") as FunctionRuntime,
+      public: !!body.public,
     })
+  }
+
+  @Put(":slug/visibility")
+  setVisibility(
+    @Param("slug") slug: string,
+    @Body() body: { public?: boolean },
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.setVisibility(session.user.id, slug, !!body.public)
   }
 
   @Patch(":slug")
