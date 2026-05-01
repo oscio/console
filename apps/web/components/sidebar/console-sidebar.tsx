@@ -119,7 +119,11 @@ export function ConsoleSidebar({
                 signOut({
                   fetchOptions: {
                     onSuccess: () => {
-                      window.location.href = "/sign-in"
+                      // Clear the local session, then bounce through
+                      // Keycloak's end_session_endpoint so the IdP
+                      // session goes too — otherwise re-clicking
+                      // "Continue with Keycloak" silently re-auths.
+                      window.location.href = "/api/auth/keycloak-logout"
                     },
                   },
                 })
