@@ -44,6 +44,14 @@ export function productionImageRef(slug: string, sha: string): string {
   return `${functionImagePrefix()}/${slug}:${sha}`
 }
 
+// Public-URL builder. When `exposed` is on, the function is reachable
+// at this URL through Traefik → Kourier. Mirrors what Knative's
+// domainTemplate is configured to emit so HTTPRoute hostname and
+// Kourier's expected Host header line up.
+export function exposedUrl(slug: string): string {
+  return `https://${slug}.${functionDomain()}`
+}
+
 // Cluster-internal Kourier endpoint console-api proxies through. The
 // in-cluster DNS doesn't depend on the platform domain, so we keep
 // a fallback to the Knative-default service name.
@@ -362,6 +370,116 @@ export async function deleteKnativeService(slug: string): Promise<void> {
         }
       })
   }
+}
+
+// ----- Public expose: HTTPRoute --------------------------------------------
+
+// Hostname Traefik should match for the function's public URL. With
+// Knative's domainTemplate set to `{{.Name}}.{{.Domain}}` the prod
+// Service's Knative-known hostname matches what we put on the
+// HTTPRoute, so Kourier routes by Host without a header rewrite.
+function exposeHostname(slug: string): string {
+  return `${prodServiceName(slug)}.${functionDomain()}`
+}
+
+function exposeRouteName(slug: string): string {
+  return `function-fn-${slug}`
+}
+
+const GATEWAY_NAMESPACE =
+  process.env.FUNCTION_GATEWAY_NAMESPACE ?? "platform-traefik"
+const GATEWAY_NAME = process.env.FUNCTION_GATEWAY_NAME ?? "platform-gateway"
+
+// Stand up the public HTTPRoute that fronts this function at
+// <slug>.fn.<domain>. Backend = the Kourier ClusterIP service in
+// kourier-system; cross-namespace ref is allowed by a one-time
+// ReferenceGrant the platform installs at boot.
+export async function ensureExposeRoute(slug: string): Promise<void> {
+  const custom = k8sCustom()
+  const name = exposeRouteName(slug)
+  const body = {
+    apiVersion: "gateway.networking.k8s.io/v1",
+    kind: "HTTPRoute",
+    metadata: {
+      name,
+      namespace: RESOURCE_NS,
+      labels: {
+        [FUNCTION_LABEL]: FUNCTION_LABEL_VALUE,
+        [FUNCTION_SLUG_LABEL]: slug,
+      },
+    },
+    spec: {
+      parentRefs: [
+        {
+          name: GATEWAY_NAME,
+          namespace: GATEWAY_NAMESPACE,
+        },
+      ],
+      hostnames: [exposeHostname(slug)],
+      rules: [
+        {
+          backendRefs: [
+            {
+              name: "kourier",
+              namespace: "kourier-system",
+              port: 80,
+            },
+          ],
+        },
+      ],
+    },
+  }
+
+  try {
+    const existing = (await custom.getNamespacedCustomObject({
+      group: "gateway.networking.k8s.io",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "httproutes",
+      name,
+    })) as { metadata?: { resourceVersion?: string } }
+    const merged = {
+      ...body,
+      metadata: {
+        ...body.metadata,
+        resourceVersion: existing.metadata?.resourceVersion,
+      },
+    }
+    await custom.replaceNamespacedCustomObject({
+      group: "gateway.networking.k8s.io",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "httproutes",
+      name,
+      body: merged,
+    })
+  } catch (err) {
+    if (!isNotFound(err)) throw err
+    await custom.createNamespacedCustomObject({
+      group: "gateway.networking.k8s.io",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "httproutes",
+      body,
+    })
+  }
+}
+
+export async function deleteExposeRoute(slug: string): Promise<void> {
+  const custom = k8sCustom()
+  await custom
+    .deleteNamespacedCustomObject({
+      group: "gateway.networking.k8s.io",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "httproutes",
+      name: exposeRouteName(slug),
+    })
+    .catch((err) => {
+      if (!isNotFound(err)) {
+        log.warn(`deleteExposeRoute ${slug}: ${(err as Error).message}`)
+      }
+    })
 }
 
 // ----- Invoke proxy --------------------------------------------------------

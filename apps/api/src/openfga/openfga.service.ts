@@ -288,25 +288,6 @@ export class OpenFgaService implements OnModuleInit {
     return this.check(userKey(userId), "can_access", functionKey(slug))
   }
 
-  // True iff the function carries a wildcard viewer tuple — i.e. any
-  // signed-in user has read access. Used to render the public/private
-  // toggle and to keep the listing/detail flows symmetric.
-  async isFunctionPublic(slug: string): Promise<boolean> {
-    return this.check("user:*", "viewer", functionKey(slug))
-  }
-
-  async grantFunctionPublic(slug: string): Promise<void> {
-    await this.write([
-      { user: "user:*", relation: "viewer", object: functionKey(slug) },
-    ])
-  }
-
-  async revokeFunctionPublic(slug: string): Promise<void> {
-    await this.deleteTuples([
-      { user: "user:*", relation: "viewer", object: functionKey(slug) },
-    ])
-  }
-
   // -------------------------------------------------------------------------
 
   private async post(path: string, body: unknown): Promise<any> {

@@ -49,17 +49,16 @@ export class FunctionsController {
     return this.fns.create(session.user.id, {
       name: (body.name ?? "").toString(),
       runtime: (body.runtime ?? "node20") as FunctionRuntime,
-      public: !!body.public,
     })
   }
 
-  @Put(":slug/visibility")
-  setVisibility(
+  @Put(":slug/expose")
+  setExposed(
     @Param("slug") slug: string,
-    @Body() body: { public?: boolean },
+    @Body() body: { exposed?: boolean },
     @CurrentSession() session: AppSession,
   ) {
-    return this.fns.setVisibility(session.user.id, slug, !!body.public)
+    return this.fns.setExposed(session.user.id, slug, !!body.exposed)
   }
 
   @Get(":slug/files")

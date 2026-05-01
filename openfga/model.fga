@@ -46,13 +46,11 @@ type agent
     define owner: [user]
     define can_access: owner
 
-# Function ownership + public visibility (Services > Functions).
-# Visibility is FGA-driven: a function is public iff it has the
-# wildcard `user:* viewer function:<slug>` tuple. listObjects with
-# can_access then returns own + public for every user without a DB
-# filter. Owner can still rename/delete; viewers can only read.
+# Function ownership (Services > Functions). Public-vs-private is
+# no longer FGA-modelled — exposing a function via fn.<domain> is
+# the real "make it public" surface and lives as a flag on the row.
+# FGA stays focused on console-side ownership.
 type function
   relations
     define owner: [user]
-    define viewer: [user, user:*]
-    define can_access: viewer or owner
+    define can_access: owner

@@ -13,7 +13,7 @@ import {
 import {
   fetchFunctions,
   renameFunction,
-  setFunctionVisibility,
+  setFunctionExposed,
   type Func,
 } from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
@@ -23,7 +23,7 @@ import {
   Code,
   GitBranch,
 } from "@phosphor-icons/react/dist/ssr"
-import { VisibilityToggle } from "../visibility-toggle"
+import { ExposeToggle } from "../expose-toggle"
 
 export default async function FunctionDetailPage({
   params,
@@ -57,10 +57,10 @@ export default async function FunctionDetailPage({
     revalidatePath("/services/functions")
   }
 
-  async function visibilityAction(isPublic: boolean) {
+  async function exposeAction(exposed: boolean) {
     "use server"
     const cookieHeader = (await headers()).get("cookie") ?? ""
-    await setFunctionVisibility(cookieHeader, slug, isPublic)
+    await setFunctionExposed(cookieHeader, slug, exposed)
     revalidatePath(`/services/functions/${slug}`)
     revalidatePath("/services/functions")
   }
@@ -76,8 +76,8 @@ export default async function FunctionDetailPage({
         </Link>
         <div className="mt-2 flex items-center gap-3">
           <RenameForm initialName={fn.name} action={renameAction} />
-          <Badge variant={fn.public ? "default" : "outline"}>
-            {fn.public ? "Public" : "Private"}
+          <Badge variant={fn.exposed ? "default" : "outline"}>
+            {fn.exposed ? "Public URL" : "Internal"}
           </Badge>
         </div>
         <p className="text-muted-foreground font-mono text-xs">{fn.slug}</p>
@@ -111,11 +111,8 @@ export default async function FunctionDetailPage({
           <CardContent>
             <Details
               fn={fn}
-              visibilityToggle={
-                <VisibilityToggle
-                  initial={fn.public}
-                  action={visibilityAction}
-                />
+              exposeToggle={
+                <ExposeToggle initial={fn.exposed} action={exposeAction} />
               }
             />
           </CardContent>
@@ -127,10 +124,10 @@ export default async function FunctionDetailPage({
 
 function Details({
   fn,
-  visibilityToggle,
+  exposeToggle,
 }: {
   fn: Func
-  visibilityToggle: React.ReactNode
+  exposeToggle: React.ReactNode
 }) {
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
@@ -140,8 +137,23 @@ function Details({
       <dd>
         <Badge variant="secondary">{fn.runtime}</Badge>
       </dd>
-      <dt className="text-muted-foreground">Visibility</dt>
-      <dd>{visibilityToggle}</dd>
+      <dt className="text-muted-foreground">Exposure</dt>
+      <dd>{exposeToggle}</dd>
+      {fn.exposed && fn.exposedUrl && (
+        <>
+          <dt className="text-muted-foreground">Public URL</dt>
+          <dd>
+            <a
+              href={fn.exposedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono hover:underline"
+            >
+              {fn.exposedUrl}
+            </a>
+          </dd>
+        </>
+      )}
       <dt className="text-muted-foreground">Status</dt>
       <dd>
         <Badge variant="outline">{fn.status}</Badge>

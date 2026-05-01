@@ -1,6 +1,7 @@
-// Phase-2 Functions resource. Postgres holds metadata; FGA tuples
-// own ACL (owner + optional `user:*` viewer for public); Forgejo
-// holds the source-of-truth code repo under org `service`.
+// Phase-2 Functions resource. Postgres holds metadata; FGA tracks
+// console-side ownership; Forgejo holds the code repo under
+// org `service`. The `exposed` column controls whether a public
+// HTTPRoute is wired up (no auth — anyone with the URL can call).
 
 export const FUNCTION_RUNTIMES = ["node20", "python3.12"] as const
 export type FunctionRuntime = (typeof FUNCTION_RUNTIMES)[number]
@@ -14,8 +15,12 @@ export type Func = {
   owner: string
   runtime: FunctionRuntime
   status: FunctionStatus
-  // FGA-driven: true iff function carries `user:* viewer` tuple.
-  public: boolean
+  // Whether the function is reachable at <slug>.fn.<domain> from
+  // outside the cluster. Off by default; toggled by the owner from
+  // the detail page. No auth — public means literally public.
+  exposed: boolean
+  // Public URL when `exposed`, otherwise empty string.
+  exposedUrl: string
   // Web URL into Forgejo, "" when client isn't configured yet.
   forgejoUrl: string
   createdAt: string
@@ -24,7 +29,4 @@ export type Func = {
 export type CreateFunctionInput = {
   name: string
   runtime: FunctionRuntime
-  // Default false — most functions start private and the owner
-  // flips visibility from the detail page when ready.
-  public?: boolean
 }

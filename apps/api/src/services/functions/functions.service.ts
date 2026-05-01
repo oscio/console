@@ -16,9 +16,12 @@ import {
 } from "./functions.types"
 import { getTemplate } from "./templates"
 import {
+  deleteExposeRoute,
   deleteFunctionCodeConfigMap,
   deleteKnativeService,
   ensureDevService,
+  ensureExposeRoute,
+  exposedUrl,
   getRuntimeMode,
   invokeFunction,
   productionImageRef,
@@ -38,8 +41,11 @@ type Row = {
   owner_id: string
   name: string
   runtime: string
+  exposed: boolean
   created_at: Date
 }
+
+const ROW_COLUMNS = `slug, owner_id, name, runtime, exposed, created_at`
 
 @Injectable()
 export class FunctionsService {
@@ -49,29 +55,25 @@ export class FunctionsService {
     private readonly forgejo: ForgejoClient,
   ) {}
 
-  // listAll — admin path. No FGA filter, no visibility check.
+  // listAll — admin path. No FGA filter.
   async listAll(): Promise<Func[]> {
     const { rows } = await authPool.query<Row>(
-      `SELECT slug, owner_id, name, runtime, created_at
-         FROM "function"
-        ORDER BY created_at DESC`,
+      `SELECT ${ROW_COLUMNS} FROM "function" ORDER BY created_at DESC`,
     )
-    return Promise.all(rows.map((r) => this.toFunc(r)))
+    return rows.map((r) => this.toFunc(r))
   }
 
   async listForOwner(ownerId: string): Promise<Func[]> {
-    // listObjects with `can_access` returns owned + public via the
-    // viewer:[user, user:*] union — no DB-side visibility filter.
     const slugs = await this.fga.listAccessibleFunctions(ownerId)
     if (slugs.length === 0) return []
     const { rows } = await authPool.query<Row>(
-      `SELECT slug, owner_id, name, runtime, created_at
+      `SELECT ${ROW_COLUMNS}
          FROM "function"
         WHERE slug = ANY($1::text[])
         ORDER BY created_at DESC`,
       [slugs],
     )
-    return Promise.all(rows.map((r) => this.toFunc(r)))
+    return rows.map((r) => this.toFunc(r))
   }
 
   async get(ownerId: string, slug: string): Promise<Func> {
@@ -79,9 +81,7 @@ export class FunctionsService {
       throw new NotFoundException(`function ${slug} not found`)
     }
     const { rows } = await authPool.query<Row>(
-      `SELECT slug, owner_id, name, runtime, created_at
-         FROM "function"
-        WHERE slug = $1`,
+      `SELECT ${ROW_COLUMNS} FROM "function" WHERE slug = $1`,
       [slug],
     )
     const row = rows[0]
@@ -101,39 +101,29 @@ export class FunctionsService {
       )
     }
     const slug = randomSlug()
-    const isPublic = !!input.public
 
     // 1. Forgejo repo first. If we created the FGA tuple/DB row first
     // and Forgejo failed, the user would see a function in the list
     // with no repo behind it. Failing on Forgejo upfront keeps state
-    // coherent — DB+FGA never get ahead of the repo.
-    //
-    // visibility mirrors to Forgejo's `private` flag: prod wants real
-    // privacy; dev keeps it relaxed but the toggle still flows through
-    // so we don't bake "always public" into the codepath.
+    // coherent — DB+FGA never get ahead of the repo. Forgejo repos
+    // start `private: false` because the in-cluster builder uses an
+    // unauthenticated clone path; per-user auth lands later.
     if (this.forgejo.enabled) {
       const tpl = getTemplate(input.runtime)
-      // Single API call replaces the per-file seed loop. Forgejo's
-      // generate-from-template fork copies the entire template repo
-      // contents into the new repo as one initial commit.
       await this.forgejo.generateFromTemplate({
         templateOwner: this.forgejo.functionOrg,
         templateRepo: tpl.repoName,
         targetOwner: this.forgejo.functionOrg,
         targetName: slug,
         description: name,
-        private: !isPublic,
+        private: false,
       })
 
-      // Stand up the dev runtime alongside the repo: ConfigMap holds
-      // the user folder content, Knative Service mounts it. The
-      // editor's Test tab hits this service. Errors here don't block
-      // create — Forgejo + DB row are already coherent and the
-      // runtime can be retried via Deploy.
+      // Stand up the dev runtime alongside the repo. Errors here
+      // don't block create — Forgejo + DB row are already coherent
+      // and the runtime can be retried via Save.
       await this.ensureRuntime(slug, input.runtime).catch((err) =>
-        this.log.warn(
-          `ensureRuntime ${slug}: ${(err as Error).message}`,
-        ),
+        this.log.warn(`ensureRuntime ${slug}: ${(err as Error).message}`),
       )
     } else {
       this.log.warn(
@@ -146,7 +136,6 @@ export class FunctionsService {
     // not yet written) or the full pair (tuple + row).
     try {
       await this.fga.grantFunctionOwner(slug, ownerId)
-      if (isPublic) await this.fga.grantFunctionPublic(slug)
     } catch (err) {
       await this.cleanupOnCreateError(slug, ownerId)
       throw err
@@ -157,10 +146,10 @@ export class FunctionsService {
       const { rows } = await authPool.query<Row>(
         `INSERT INTO "function" (slug, owner_id, name, runtime)
          VALUES ($1, $2, $3, $4)
-         RETURNING slug, owner_id, name, runtime, created_at`,
+         RETURNING ${ROW_COLUMNS}`,
         [slug, ownerId, name, input.runtime],
       )
-      return this.toFunc(rows[0]!, isPublic)
+      return this.toFunc(rows[0]!)
     } catch (err) {
       await this.cleanupOnCreateError(slug, ownerId)
       throw err
@@ -187,28 +176,33 @@ export class FunctionsService {
     }
   }
 
-  async setVisibility(
+  // Toggle the public HTTPRoute that fronts the function at
+  // <slug>.fn.<domain>. On = ensureExposeRoute creates an HTTPRoute
+  // pointing at Kourier, off = the route is removed. No auth either
+  // way; "exposed" means literally public.
+  async setExposed(
     ownerId: string,
     slug: string,
-    isPublic: boolean,
-  ): Promise<{ public: boolean }> {
+    exposed: boolean,
+  ): Promise<{ exposed: boolean }> {
     const owners = await this.fga.listFunctionOwners(slug)
     if (!owners.includes(ownerId)) {
       throw new NotFoundException(`function ${slug} not found`)
     }
-    const wasPublic = await this.fga.isFunctionPublic(slug)
-    if (isPublic && !wasPublic) {
-      await this.fga.grantFunctionPublic(slug)
-    } else if (!isPublic && wasPublic) {
-      await this.fga.revokeFunctionPublic(slug)
+    const result = await authPool.query(
+      `UPDATE "function" SET exposed = $1, updated_at = now()
+         WHERE slug = $2`,
+      [exposed, slug],
+    )
+    if (result.rowCount === 0) {
+      throw new NotFoundException(`function ${slug} not found`)
     }
-    // Mirror to Forgejo so the asymmetry doesn't survive into prod.
-    if (this.forgejo.enabled) {
-      await this.forgejo
-        .setRepoVisibility(this.forgejo.functionOrg, slug, !isPublic)
-        .catch((err) => this.log.warn(`Forgejo visibility ${slug}: ${err}`))
+    if (exposed) {
+      await ensureExposeRoute(slug)
+    } else {
+      await deleteExposeRoute(slug)
     }
-    return { public: isPublic }
+    return { exposed }
   }
 
   // ---- handler files (Monaco editor) -------------------------------------
@@ -525,9 +519,6 @@ export class FunctionsService {
       throw new NotFoundException(`function ${slug} not found`)
     }
     await authPool.query(`DELETE FROM "function" WHERE slug = $1`, [slug])
-    if (await this.fga.isFunctionPublic(slug)) {
-      await this.fga.revokeFunctionPublic(slug).catch(() => {})
-    }
     for (const uid of owners) {
       await this.fga.revokeFunctionOwner(slug, uid).catch(() => {})
     }
@@ -536,7 +527,9 @@ export class FunctionsService {
         .deleteRepo(this.forgejo.functionOrg, slug)
         .catch((err) => this.log.error(`Forgejo delete ${slug}: ${err}`))
     }
-    // Tear down the dev runtime — both ConfigMap and Knative Service.
+    // Tear down the runtime — Knative Services + ConfigMap + the
+    // public HTTPRoute (no-op if exposed was off).
+    await deleteExposeRoute(slug)
     await deleteKnativeService(slug)
     await deleteFunctionCodeConfigMap(slug)
   }
@@ -560,22 +553,9 @@ export class FunctionsService {
       .catch((err) =>
         this.log.warn(`cleanupOnCreateError fga owner ${slug}: ${err}`),
       )
-    if (await this.fga.isFunctionPublic(slug).catch(() => false)) {
-      await this.fga
-        .revokeFunctionPublic(slug)
-        .catch((err) =>
-          this.log.warn(`cleanupOnCreateError fga public ${slug}: ${err}`),
-        )
-    }
   }
 
-  // Pre-fetched isPublic flag avoids a second FGA round-trip when the
-  // caller already has it (e.g. right after a setVisibility).
-  private async toFunc(row: Row, knownPublic?: boolean): Promise<Func> {
-    const isPublic =
-      knownPublic !== undefined
-        ? knownPublic
-        : await this.fga.isFunctionPublic(row.slug).catch(() => false)
+  private toFunc(row: Row): Func {
     return {
       id: row.slug,
       slug: row.slug,
@@ -583,7 +563,8 @@ export class FunctionsService {
       owner: row.owner_id,
       runtime: row.runtime as FunctionRuntime,
       status: "Draft",
-      public: isPublic,
+      exposed: row.exposed,
+      exposedUrl: row.exposed ? exposedUrl(row.slug) : "",
       forgejoUrl: this.forgejo.repoWebUrl(row.slug),
       createdAt: row.created_at.toISOString(),
     }

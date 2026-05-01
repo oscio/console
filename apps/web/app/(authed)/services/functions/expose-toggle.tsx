@@ -10,35 +10,33 @@ import {
   SelectValue,
 } from "@workspace/ui/components/select"
 
-// Owner-only visibility toggle. The server action grants or revokes
-// the `user:* viewer` FGA tuple; the rest of the app reads visibility
-// off the same tuple, so a refresh after the change picks up the new
-// state across list + detail.
-export function VisibilityToggle({
+// Owner-only public-URL toggle. On = the platform creates an
+// HTTPRoute fronting the function at <slug>.fn.<domain>. There's no
+// auth on the route — exposed means literally public, anyone with
+// the URL can call.
+export function ExposeToggle({
   initial,
   action,
 }: {
   initial: boolean
-  action: (isPublic: boolean) => Promise<void>
+  action: (exposed: boolean) => Promise<void>
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [value, setValue] = useState<"public" | "private">(
-    initial ? "public" : "private",
-  )
+  const [value, setValue] = useState<"on" | "off">(initial ? "on" : "off")
 
   return (
     <Select
       value={value}
       disabled={pending}
       onValueChange={(v) => {
-        const next = v as "public" | "private"
+        const next = v as "on" | "off"
         if (next === value) return
         const prev = value
         setValue(next)
         startTransition(async () => {
           try {
-            await action(next === "public")
+            await action(next === "on")
             router.refresh()
           } catch {
             setValue(prev)
@@ -50,8 +48,8 @@ export function VisibilityToggle({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="private">Private</SelectItem>
-        <SelectItem value="public">Public</SelectItem>
+        <SelectItem value="off">Internal</SelectItem>
+        <SelectItem value="on">Public URL</SelectItem>
       </SelectContent>
     </Select>
   )

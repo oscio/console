@@ -614,8 +614,11 @@ export type Func = {
   owner: string
   runtime: FunctionRuntime
   status: FunctionStatus
-  // True when anyone signed-in can read; owner can still rename/delete.
-  public: boolean
+  // Whether the function is reachable from outside the cluster at
+  // <slug>.fn.<domain>. No auth — public means literally public.
+  exposed: boolean
+  // Public URL when `exposed`, otherwise empty string.
+  exposedUrl: string
   // Web URL into Forgejo. "" when the client isn't configured yet.
   forgejoUrl: string
   createdAt: string
@@ -635,7 +638,7 @@ export async function fetchFunctions(
 
 export async function createFunction(
   cookieHeader: string,
-  input: { name: string; runtime: FunctionRuntime; public?: boolean },
+  input: { name: string; runtime: FunctionRuntime },
 ): Promise<Func> {
   const res = await fetch(`${API_URL}/functions`, {
     method: "POST",
@@ -812,23 +815,23 @@ export async function invokeFunction(
   return (await res.json()) as FunctionInvocationResult
 }
 
-export async function setFunctionVisibility(
+export async function setFunctionExposed(
   cookieHeader: string,
   slug: string,
-  isPublic: boolean,
+  exposed: boolean,
 ): Promise<void> {
   const res = await fetch(
-    `${API_URL}/functions/${encodeURIComponent(slug)}/visibility`,
+    `${API_URL}/functions/${encodeURIComponent(slug)}/expose`,
     {
       method: "PUT",
       headers: { cookie: cookieHeader, "content-type": "application/json" },
-      body: JSON.stringify({ public: isPublic }),
+      body: JSON.stringify({ exposed }),
       cache: "no-store",
     },
   )
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`functions visibility put failed: ${res.status} ${text}`)
+    throw new Error(`functions expose put failed: ${res.status} ${text}`)
   }
 }
 

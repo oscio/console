@@ -30,10 +30,15 @@ async function ensureSchema(): Promise<void> {
       owner_id text NOT NULL,
       name text NOT NULL,
       runtime text NOT NULL,
+      exposed boolean NOT NULL DEFAULT false,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS function_owner_idx ON "function"(owner_id);
+    -- Idempotent backfill for clusters that pre-date the column. Uses
+    -- ALTER TABLE … IF NOT EXISTS (Postgres 9.6+) so it's safe to run
+    -- on every boot.
+    ALTER TABLE "function" ADD COLUMN IF NOT EXISTS exposed boolean NOT NULL DEFAULT false;
   `)
 
   // System user — the platform's own identity. Seeded with the
