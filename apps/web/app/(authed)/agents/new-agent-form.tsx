@@ -121,7 +121,7 @@ export function NewAgentForm({
             </Select>
           </Field>
 
-          {agentType === "zeroclaw" && (
+          {(agentType === "zeroclaw" || agentType === "hermes") && (
             <Field
               id="agent-model"
               label="Model"

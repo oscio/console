@@ -331,7 +331,7 @@ export function NewVmForm({
                   <code>boundToVm = &lt;this VM&gt;</code>. Cascade-deleted
                   with the VM.
                 </p>
-                {agentType === "zeroclaw" && (
+                {agentType !== "none" && (
                   <div className="space-y-1.5">
                     <Label htmlFor="vm-agent-model" className="text-xs">
                       Model

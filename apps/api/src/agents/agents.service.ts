@@ -290,8 +290,15 @@ export class AgentsService {
     // model). Provider credentials (OPENROUTER_API_KEY etc.) live in
     // the cluster-wide GLOBAL_AGENT_ENV_SECRET, attached separately.
     const perPodEnv: Record<string, string> = {}
-    if (input.agentType === "zeroclaw" && input.model) {
-      perPodEnv.ZEROCLAW_DEFAULT_MODEL = input.model
+    if (input.model) {
+      // Same model field, agent-specific env name. Both adapters
+      // hit OpenRouter and accept the same `provider/model-id`
+      // shape; the env name just matches each CLI's expectation.
+      if (input.agentType === "zeroclaw") {
+        perPodEnv.ZEROCLAW_DEFAULT_MODEL = input.model
+      } else if (input.agentType === "hermes") {
+        perPodEnv.HERMES_MODEL = input.model
+      }
     }
     let envFromSecretName: string | null = null
     if (Object.keys(perPodEnv).length > 0) {
