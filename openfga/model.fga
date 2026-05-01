@@ -46,10 +46,13 @@ type agent
     define owner: [user]
     define can_access: owner
 
-# Function ownership (Services > Functions). Phase 1 is metadata-only
-# in Postgres; same `owner`/`can_access` shape so the runtime path
-# (Knative/etc.) can layer on top later without an FGA migration.
+# Function ownership + public visibility (Services > Functions).
+# Visibility is FGA-driven: a function is public iff it has the
+# wildcard `user:* viewer function:<slug>` tuple. listObjects with
+# can_access then returns own + public for every user without a DB
+# filter. Owner can still rename/delete; viewers can only read.
 type function
   relations
     define owner: [user]
-    define can_access: owner
+    define viewer: [user, user:*]
+    define can_access: viewer or owner

@@ -84,11 +84,25 @@
       "type": "function",
       "relations": {
         "owner":      { "this": {} },
-        "can_access": { "computedUserset": { "relation": "owner" } }
+        "viewer":     { "this": {} },
+        "can_access": {
+          "union": {
+            "child": [
+              { "computedUserset": { "relation": "viewer" } },
+              { "computedUserset": { "relation": "owner" } }
+            ]
+          }
+        }
       },
       "metadata": {
         "relations": {
-          "owner": { "directly_related_user_types": [ { "type": "user" } ] }
+          "owner":  { "directly_related_user_types": [ { "type": "user" } ] },
+          "viewer": {
+            "directly_related_user_types": [
+              { "type": "user" },
+              { "type": "user", "wildcard": {} }
+            ]
+          }
         }
       }
     }
