@@ -218,16 +218,27 @@ export class FunctionsService {
     if (!row) throw new NotFoundException(`function ${slug} not found`)
     const tpl = getTemplate(row.runtime as FunctionRuntime)
 
-    // Walk the userFolder one level (Forgejo's content API is
-    // single-level). Phase-2 doesn't allow nested directories under
-    // the user folder via console — power users can still nest via
-    // git, but they won't surface in the editor.
-    const entries = await this.forgejo.listDirectory({
-      org: this.forgejo.functionOrg,
-      repo: slug,
-      path: tpl.userFolder,
-    })
-    const fileEntries = entries.filter((e) => e.type === "file")
+    // Recursively walk the userFolder. Forgejo's contents API is
+    // per-directory, so we BFS through subfolders that show up in
+    // the listing. Cap depth at 8 levels — deep enough for normal
+    // use, shallow enough that a misconfigured repo can't pin the
+    // worker.
+    const fileEntries: { path: string }[] = []
+    const queue: string[] = [tpl.userFolder]
+    let visited = 0
+    while (queue.length > 0 && visited < 256) {
+      const dir = queue.shift()!
+      visited++
+      const entries = await this.forgejo.listDirectory({
+        org: this.forgejo.functionOrg,
+        repo: slug,
+        path: dir,
+      })
+      for (const e of entries) {
+        if (e.type === "file") fileEntries.push({ path: e.path })
+        else if (e.type === "dir") queue.push(e.path)
+      }
+    }
 
     const files = await Promise.all(
       fileEntries.map(async (e) => {
@@ -260,8 +271,11 @@ export class FunctionsService {
   async updateFiles(
     ownerId: string,
     slug: string,
-    files: { path: string; content: string }[],
-    message?: string,
+    input: {
+      files?: { path: string; content: string }[]
+      deletes?: string[]
+      message?: string
+    },
   ): Promise<{ commitMessage: string }> {
     const owners = await this.fga.listFunctionOwners(slug)
     if (!owners.includes(ownerId)) {
@@ -278,31 +292,52 @@ export class FunctionsService {
     if (!row) throw new NotFoundException(`function ${slug} not found`)
     const tpl = getTemplate(row.runtime as FunctionRuntime)
 
+    const writes = input.files ?? []
+    const deletes = input.deletes ?? []
+    if (writes.length === 0 && deletes.length === 0) {
+      return { commitMessage: "" }
+    }
+
     // Reject paths that escape the userFolder — Phase-2 keeps the
     // platform layer (runner / Dockerfile / workflow) un-editable
     // through the API. Power users can still touch those via git.
-    for (const f of files) {
-      if (!f.path.startsWith(tpl.userFolder + "/")) {
+    const inUserFolder = (p: string) => p.startsWith(tpl.userFolder + "/")
+    for (const f of writes) {
+      if (!inUserFolder(f.path)) {
         throw new BadRequestException(
           `path ${f.path} is outside the editable folder ${tpl.userFolder}/`,
         )
       }
     }
+    for (const p of deletes) {
+      if (!inUserFolder(p)) {
+        throw new BadRequestException(
+          `path ${p} is outside the editable folder ${tpl.userFolder}/`,
+        )
+      }
+    }
 
-    const commitMessage = (message?.trim() || `deploy: edit ${tpl.userFolder}/`).slice(
-      0,
-      200,
-    )
+    const commitMessage = (
+      input.message?.trim() || `deploy: edit ${tpl.userFolder}/`
+    ).slice(0, 200)
 
-    // One commit per file because the contents API is per-file. Cheap
+    // One commit per op because the contents API is per-file. Cheap
     // enough for the small folders we expect in Phase 2; revisit with
     // git/trees batch if function repos grow.
-    for (const f of files) {
+    for (const f of writes) {
       await this.forgejo.writeFile({
         org: this.forgejo.functionOrg,
         repo: slug,
         path: f.path,
         content: f.content,
+        message: commitMessage,
+      })
+    }
+    for (const p of deletes) {
+      await this.forgejo.deleteFile({
+        org: this.forgejo.functionOrg,
+        repo: slug,
+        path: p,
         message: commitMessage,
       })
     }

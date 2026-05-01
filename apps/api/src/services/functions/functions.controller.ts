@@ -76,16 +76,25 @@ export class FunctionsController {
     @Body()
     body: {
       files?: { path?: string; content?: string }[]
+      deletes?: string[]
       message?: string
     },
     @CurrentSession() session: AppSession,
   ) {
     const files = (body.files ?? [])
-      .filter((f): f is { path: string; content: string } =>
-        typeof f.path === "string" && typeof f.content === "string",
+      .filter(
+        (f): f is { path: string; content: string } =>
+          typeof f.path === "string" && typeof f.content === "string",
       )
       .map((f) => ({ path: f.path, content: f.content }))
-    return this.fns.updateFiles(session.user.id, slug, files, body.message)
+    const deletes = (body.deletes ?? []).filter(
+      (p): p is string => typeof p === "string",
+    )
+    return this.fns.updateFiles(session.user.id, slug, {
+      files,
+      deletes,
+      message: body.message,
+    })
   }
 
   @Patch(":slug")

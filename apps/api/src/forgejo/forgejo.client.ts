@@ -277,6 +277,36 @@ export class ForgejoClient {
     }
   }
 
+  // Delete a single file in a repo. Forgejo demands the current
+  // blob SHA — we fetch it transparently so the caller doesn't have
+  // to. 404 collapses to a no-op (caller's intent: "make it gone").
+  async deleteFile(input: {
+    org: string
+    repo: string
+    path: string
+    message: string
+    branch?: string
+  }): Promise<void> {
+    const existing = await this.getFileContent({
+      org: input.org,
+      repo: input.repo,
+      path: input.path,
+      ref: input.branch,
+    })
+    if (!existing) return
+    const url = `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/contents/${encodeURIComponent(input.path)}`
+    const r = await this.request("DELETE", url, {
+      message: input.message,
+      sha: existing.sha,
+      ...(input.branch ? { branch: input.branch } : {}),
+    })
+    if (r.status !== 200 && r.status !== 204 && r.status !== 404) {
+      throw new Error(
+        `Forgejo deleteFile(${input.org}/${input.repo}:${input.path}) -> ${r.status}: ${r.text}`,
+      )
+    }
+  }
+
   // 404 is fine — already gone is the desired state.
   async deleteRepo(org: string, name: string): Promise<void> {
     const r = await this.request(

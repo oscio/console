@@ -712,15 +712,18 @@ export async function fetchFunctionFiles(
 export async function saveFunctionFiles(
   cookieHeader: string,
   slug: string,
-  files: { path: string; content: string }[],
-  message?: string,
+  input: {
+    files?: { path: string; content: string }[]
+    deletes?: string[]
+    message?: string
+  },
 ): Promise<void> {
   const res = await fetch(
     `${API_URL}/functions/${encodeURIComponent(slug)}/files`,
     {
       method: "PUT",
       headers: { cookie: cookieHeader, "content-type": "application/json" },
-      body: JSON.stringify({ files, message }),
+      body: JSON.stringify(input),
       cache: "no-store",
     },
   )

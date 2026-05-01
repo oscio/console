@@ -39,13 +39,14 @@ export default async function FunctionEditPage({
     codeError = (err as Error).message
   }
 
-  async function saveFilesAction(
-    files: { path: string; content: string }[],
-  ) {
+  async function saveFilesAction(input: {
+    files: { path: string; content: string }[]
+    deletes: string[]
+  }) {
     "use server"
     const cookieHeader = (await headers()).get("cookie") ?? ""
     try {
-      await saveFunctionFiles(cookieHeader, slug, files)
+      await saveFunctionFiles(cookieHeader, slug, input)
     } catch (err) {
       return { error: (err as Error).message }
     }
@@ -76,8 +77,9 @@ export default async function FunctionEditPage({
           initialFiles={filesData.files}
           defaultFile={filesData.defaultFile}
           fallbackLanguage={filesData.language}
+          rootFolder={filesData.folder}
           saveAction={saveFilesAction}
-          height="calc(100vh - 12rem)"
+          height="calc(100vh - 11rem)"
         />
       ) : (
         <p className="text-destructive text-sm">
