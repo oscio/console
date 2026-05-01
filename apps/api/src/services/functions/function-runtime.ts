@@ -10,9 +10,31 @@ const FUNCTION_SLUG_LABEL = "agent-platform/function-slug"
 // runtime (starlette + uvicorn + the runner main.py); user code
 // arrives via ConfigMap mount, so iterating doesn't require a build.
 function devImage(): string {
+  const v = process.env.FUNCTION_DEV_IMAGE
+  if (!v) {
+    throw new Error("FUNCTION_DEV_IMAGE env var is required")
+  }
+  return v
+}
+
+// Domain Knative auto-generates Service URLs under, supplied by tf
+// (config-domain entry). Required — there's no sensible default that
+// would happen to match a fresh cluster's setup.
+function functionDomain(): string {
+  const v = process.env.FUNCTION_DOMAIN
+  if (!v) {
+    throw new Error("FUNCTION_DOMAIN env var is required")
+  }
+  return v
+}
+
+// Cluster-internal Kourier endpoint console-api proxies through. The
+// in-cluster DNS doesn't depend on the platform domain, so we keep
+// a fallback to the Knative-default service name.
+function kourierUrl(): string {
   return (
-    process.env.FUNCTION_DEV_IMAGE ??
-    "cr.dev.openschema.io/agent-platform/function-dev-python:latest"
+    process.env.FUNCTION_INVOKE_TARGET ??
+    "http://kourier.kourier-system.svc.cluster.local"
   )
 }
 
@@ -107,33 +129,89 @@ export async function deleteFunctionCodeConfigMap(slug: string): Promise<void> {
 
 // ----- Knative Service -----------------------------------------------------
 
-// Kourier needs to know about the service — we let Knative's defaults
-// handle URL generation (config-domain points at fn.<domain>). The
-// pod mounts the ConfigMap at /app/function so the dev runner picks
-// up edits without a rebuild.
+// The dev pod mounts the ConfigMap at /app/function so the dev
+// runner picks up edits without a rebuild. Update strategy is
+// GET → replace (PUT) rather than PATCH — the @kubernetes/client-node
+// v1 typed client defaults to application/json-patch+json content
+// type, which expects a JSON Patch array; sending an object body
+// crashes with "cannot unmarshal object into []handlers.jsonPatchOp".
 export async function ensureKnativeService(slug: string): Promise<void> {
   const custom = k8sCustom()
   const name = knativeServiceName(slug)
   const cm = configMapName(slug)
 
-  const body = {
+  const desired = buildKnativeServiceBody({ name, slug, configMap: cm })
+
+  let existing: { metadata?: { resourceVersion?: string } } | null = null
+  try {
+    const res = (await custom.getNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      name,
+    })) as { metadata?: { resourceVersion?: string } }
+    existing = res
+  } catch (err) {
+    if (!isNotFound(err)) throw err
+  }
+
+  if (existing) {
+    desired.metadata.resourceVersion = existing.metadata?.resourceVersion
+    await custom.replaceNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      name,
+      body: desired,
+    })
+  } else {
+    await custom.createNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      body: desired,
+    })
+  }
+}
+
+type KnativeServiceBody = {
+  apiVersion: string
+  kind: string
+  metadata: {
+    name: string
+    namespace: string
+    labels: Record<string, string>
+    resourceVersion?: string
+  }
+  spec: unknown
+}
+
+function buildKnativeServiceBody(input: {
+  name: string
+  slug: string
+  configMap: string
+}): KnativeServiceBody {
+  return {
     apiVersion: "serving.knative.dev/v1",
     kind: "Service",
     metadata: {
-      name,
+      name: input.name,
       namespace: RESOURCE_NS,
       labels: {
         [FUNCTION_LABEL]: FUNCTION_LABEL_VALUE,
-        [FUNCTION_SLUG_LABEL]: slug,
+        [FUNCTION_SLUG_LABEL]: input.slug,
       },
     },
     spec: {
       template: {
         metadata: {
           // Knative reads this as part of the Revision template;
-          // changing it forces a new Revision (= new pod). We bump it
-          // in syncFunctionCodeConfigMap → ensureKnativeService so the
-          // Revision rolls when the user clicks Deploy.
+          // changing it forces a new Revision (= new pod). We bump
+          // it on every ensureKnativeService so a no-op Deploy
+          // still rolls fresh ConfigMap content.
           annotations: {
             "agent-platform/code-version": String(Date.now()),
           },
@@ -154,44 +232,12 @@ export async function ensureKnativeService(slug: string): Promise<void> {
           volumes: [
             {
               name: "code",
-              configMap: { name: cm },
+              configMap: { name: input.configMap },
             },
           ],
         },
       },
     },
-  }
-
-  try {
-    await custom.getNamespacedCustomObject({
-      group: "serving.knative.dev",
-      version: "v1",
-      namespace: RESOURCE_NS,
-      plural: "services",
-      name,
-    })
-    // Exists — replace via JSON merge patch so the code-version
-    // annotation rolls a new Revision.
-    await custom.patchNamespacedCustomObject({
-      group: "serving.knative.dev",
-      version: "v1",
-      namespace: RESOURCE_NS,
-      plural: "services",
-      name,
-      body,
-    })
-  } catch (err) {
-    if (isNotFound(err)) {
-      await custom.createNamespacedCustomObject({
-        group: "serving.knative.dev",
-        version: "v1",
-        namespace: RESOURCE_NS,
-        plural: "services",
-        body,
-      })
-    } else {
-      throw err
-    }
   }
 }
 
@@ -231,12 +277,9 @@ export async function invokeFunction(
   headers: Record<string, string>
   body: string
 }> {
-  const kourierService = process.env.FUNCTION_INVOKE_TARGET ??
-    "http://kourier.kourier-system.svc.cluster.local"
-  const knDomain = process.env.FUNCTION_DOMAIN ?? "fn.dev.openschema.io"
-  const host = `${knativeServiceName(slug)}.${RESOURCE_NS}.${knDomain}`
+  const host = `${knativeServiceName(slug)}.${RESOURCE_NS}.${functionDomain()}`
   const path = request.path.startsWith("/") ? request.path : `/${request.path}`
-  const url = `${kourierService.replace(/\/$/, "")}${path}`
+  const url = `${kourierUrl().replace(/\/$/, "")}${path}`
 
   // Default headers + caller-supplied. Force Host so Kourier routes
   // to the right Knative Service; user-set Host gets ignored.
