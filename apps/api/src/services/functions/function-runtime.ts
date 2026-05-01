@@ -519,7 +519,11 @@ export async function invokeFunction(
   const surface = request.target ?? "dev"
   const serviceName =
     surface === "prod" ? prodServiceName(slug) : devServiceName(slug)
-  const host = `${serviceName}.${RESOURCE_NS}.${functionDomain()}`
+  // Hostname has to match what Knative emits via its domainTemplate.
+  // We changed the template to drop the namespace segment (so the
+  // single-label `*.fn.<domain>` Gateway listener matches), so here
+  // it's just `<service>.<domain>` — no RESOURCE_NS in between.
+  const host = `${serviceName}.${functionDomain()}`
   const path = request.path.startsWith("/") ? request.path : `/${request.path}`
   const upstream = new URL(kourierUrl())
   if (upstream.protocol !== "http:") {
