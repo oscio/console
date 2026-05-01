@@ -33,6 +33,18 @@ async function ensureSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS function_owner_idx ON "function"(owner_id);
   `)
+
+  // System user — the platform's own identity. Seeded with the
+  // platform-admin group claim so any FGA tuple owned by `system`
+  // (Phase-2 `service` org repos, future bootstrap tuples) has a
+  // real subject backing it. Idempotent: ON CONFLICT keeps reseeds
+  // cheap and lets ensureSchema run on every boot. The accounts
+  // controller refuses to delete this row.
+  await authPool.query(`
+    INSERT INTO "user" (id, name, email, "emailVerified", groups)
+    VALUES ('system', 'system', 'system@platform.local', true, '["platform-admin"]'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+  `)
 }
 
 async function bootstrap() {
