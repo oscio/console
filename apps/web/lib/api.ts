@@ -682,48 +682,51 @@ export async function renameFunction(
   }
 }
 
-export type FunctionCode = {
-  // Path of the editable file inside the repo, e.g. handler.py.
-  path: string
-  // Monaco language id (e.g. "python", "javascript").
+export type FunctionFiles = {
+  // User-editable folder inside the function repo (e.g. "function").
+  // Anything outside is platform-managed.
+  folder: string
+  // Monaco language id ("python", "javascript", ...).
   language: string
-  // Current contents on the default branch.
-  content: string
+  // Path the editor opens onto by default (e.g. "function/main.py").
+  defaultFile: string
+  // All files under `folder`, defaultFile-first then alphabetical.
+  files: { path: string; content: string }[]
 }
 
-export async function fetchFunctionCode(
+export async function fetchFunctionFiles(
   cookieHeader: string,
   slug: string,
-): Promise<FunctionCode> {
+): Promise<FunctionFiles> {
   const res = await fetch(
-    `${API_URL}/functions/${encodeURIComponent(slug)}/code`,
+    `${API_URL}/functions/${encodeURIComponent(slug)}/files`,
     { headers: { cookie: cookieHeader }, cache: "no-store" },
   )
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`functions code fetch failed: ${res.status} ${text}`)
+    throw new Error(`functions files fetch failed: ${res.status} ${text}`)
   }
-  return (await res.json()) as FunctionCode
+  return (await res.json()) as FunctionFiles
 }
 
-export async function saveFunctionCode(
+export async function saveFunctionFiles(
   cookieHeader: string,
   slug: string,
-  content: string,
+  files: { path: string; content: string }[],
   message?: string,
 ): Promise<void> {
   const res = await fetch(
-    `${API_URL}/functions/${encodeURIComponent(slug)}/code`,
+    `${API_URL}/functions/${encodeURIComponent(slug)}/files`,
     {
       method: "PUT",
       headers: { cookie: cookieHeader, "content-type": "application/json" },
-      body: JSON.stringify({ content, message }),
+      body: JSON.stringify({ files, message }),
       cache: "no-store",
     },
   )
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`functions code save failed: ${res.status} ${text}`)
+    throw new Error(`functions files save failed: ${res.status} ${text}`)
   }
 }
 

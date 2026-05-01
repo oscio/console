@@ -14,7 +14,7 @@ import {
   Func,
   FunctionRuntime,
 } from "./functions.types"
-import { buildInitialFiles, getTemplate } from "./templates"
+import { getTemplate } from "./templates"
 
 // `function-` prefix matches the Forgejo repo name: a function whose
 // slug is `function-abcd1234` lives at `service/function-abcd1234`.
@@ -102,25 +102,18 @@ export class FunctionsService {
     // privacy; dev keeps it relaxed but the toggle still flows through
     // so we don't bake "always public" into the codepath.
     if (this.forgejo.enabled) {
-      await this.forgejo.ensureOrg(this.forgejo.functionOrg)
-      await this.forgejo.createOrgRepo({
-        org: this.forgejo.functionOrg,
-        name: slug,
+      const tpl = getTemplate(input.runtime)
+      // Single API call replaces the per-file seed loop. Forgejo's
+      // generate-from-template fork copies the entire template repo
+      // contents into the new repo as one initial commit.
+      await this.forgejo.generateFromTemplate({
+        templateOwner: this.forgejo.functionOrg,
+        templateRepo: tpl.repoName,
+        targetOwner: this.forgejo.functionOrg,
+        targetName: slug,
         description: name,
         private: !isPublic,
       })
-      // Seed the template files. Each writeFile is its own commit —
-      // ugly but harmless on a fresh repo, and avoids dragging in a
-      // git library to make a single multi-file commit.
-      for (const file of buildInitialFiles(input.runtime, slug)) {
-        await this.forgejo.writeFile({
-          org: this.forgejo.functionOrg,
-          repo: slug,
-          path: file.path,
-          content: file.content,
-          message: `init: ${file.path}`,
-        })
-      }
     } else {
       this.log.warn(
         `Forgejo client not configured — creating function ${slug} without a repo`,
@@ -197,15 +190,20 @@ export class FunctionsService {
     return { public: isPublic }
   }
 
-  // ---- handler code (Monaco editor) --------------------------------------
-  // The console only ever exposes one file — the handler — even though
-  // the repo carries Dockerfile / runner / workflow. Power users edit
-  // those via git directly.
+  // ---- handler files (Monaco editor) -------------------------------------
+  // Console UI only exposes the user folder (e.g. `function/`). Anything
+  // outside — runner main.py, Dockerfile, workflow — is platform-managed
+  // and only edited by power users via git.
 
-  async getCode(
+  async getFiles(
     ownerId: string,
     slug: string,
-  ): Promise<{ path: string; language: string; content: string }> {
+  ): Promise<{
+    folder: string
+    language: string
+    defaultFile: string
+    files: { path: string; content: string }[]
+  }> {
     if (!(await this.fga.canAccessFunction(ownerId, slug))) {
       throw new NotFoundException(`function ${slug} not found`)
     }
@@ -219,24 +217,50 @@ export class FunctionsService {
     const row = rows[0]
     if (!row) throw new NotFoundException(`function ${slug} not found`)
     const tpl = getTemplate(row.runtime as FunctionRuntime)
-    const file = await this.forgejo.getFileContent({
+
+    // Walk the userFolder one level (Forgejo's content API is
+    // single-level). Phase-2 doesn't allow nested directories under
+    // the user folder via console — power users can still nest via
+    // git, but they won't surface in the editor.
+    const entries = await this.forgejo.listDirectory({
       org: this.forgejo.functionOrg,
       repo: slug,
-      path: tpl.handlerPath,
+      path: tpl.userFolder,
     })
-    if (!file) {
-      // Template seeding ran on create — a missing handler usually
-      // means the function pre-dates Phase-2.x or the seed was
-      // partial. Surface the empty state rather than 404'ing the UI.
-      return { path: tpl.handlerPath, language: tpl.language, content: "" }
+    const fileEntries = entries.filter((e) => e.type === "file")
+
+    const files = await Promise.all(
+      fileEntries.map(async (e) => {
+        const f = await this.forgejo.getFileContent({
+          org: this.forgejo.functionOrg,
+          repo: slug,
+          path: e.path,
+        })
+        return { path: e.path, content: f?.content ?? "" }
+      }),
+    )
+
+    // Stable ordering: defaultFile first, rest alphabetical. Editor
+    // opens onto defaultFile when it's present, falls back to the
+    // first file otherwise.
+    files.sort((a, b) => {
+      if (a.path === tpl.defaultFile) return -1
+      if (b.path === tpl.defaultFile) return 1
+      return a.path.localeCompare(b.path)
+    })
+
+    return {
+      folder: tpl.userFolder,
+      language: tpl.language,
+      defaultFile: tpl.defaultFile,
+      files,
     }
-    return { path: tpl.handlerPath, language: tpl.language, content: file.content }
   }
 
-  async updateCode(
+  async updateFiles(
     ownerId: string,
     slug: string,
-    content: string,
+    files: { path: string; content: string }[],
     message?: string,
   ): Promise<{ commitMessage: string }> {
     const owners = await this.fga.listFunctionOwners(slug)
@@ -253,14 +277,35 @@ export class FunctionsService {
     const row = rows[0]
     if (!row) throw new NotFoundException(`function ${slug} not found`)
     const tpl = getTemplate(row.runtime as FunctionRuntime)
-    const commitMessage = (message?.trim() || `update ${tpl.handlerPath}`).slice(0, 200)
-    await this.forgejo.writeFile({
-      org: this.forgejo.functionOrg,
-      repo: slug,
-      path: tpl.handlerPath,
-      content,
-      message: commitMessage,
-    })
+
+    // Reject paths that escape the userFolder — Phase-2 keeps the
+    // platform layer (runner / Dockerfile / workflow) un-editable
+    // through the API. Power users can still touch those via git.
+    for (const f of files) {
+      if (!f.path.startsWith(tpl.userFolder + "/")) {
+        throw new BadRequestException(
+          `path ${f.path} is outside the editable folder ${tpl.userFolder}/`,
+        )
+      }
+    }
+
+    const commitMessage = (message?.trim() || `deploy: edit ${tpl.userFolder}/`).slice(
+      0,
+      200,
+    )
+
+    // One commit per file because the contents API is per-file. Cheap
+    // enough for the small folders we expect in Phase 2; revisit with
+    // git/trees batch if function repos grow.
+    for (const f of files) {
+      await this.forgejo.writeFile({
+        org: this.forgejo.functionOrg,
+        repo: slug,
+        path: f.path,
+        content: f.content,
+        message: commitMessage,
+      })
+    }
     await authPool.query(
       `UPDATE "function" SET updated_at = now() WHERE slug = $1`,
       [slug],

@@ -169,6 +169,94 @@ export class ForgejoClient {
     )
   }
 
+  // List a directory under a repo. Single-level — caller does the
+  // recursion if it wants a tree. Each entry has `type=file|dir`,
+  // `name`, `path`, `sha`, `size`. Returns [] when the path is empty
+  // or doesn't exist (404 collapses to empty rather than throwing,
+  // matching the listing-fits-empty UX).
+  async listDirectory(input: {
+    org: string
+    repo: string
+    path: string
+    ref?: string
+  }): Promise<
+    Array<{ type: "file" | "dir"; name: string; path: string; sha: string; size: number }>
+  > {
+    const ref = input.ref ? `?ref=${encodeURIComponent(input.ref)}` : ""
+    const r = await this.request(
+      "GET",
+      `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/contents/${encodeURIComponent(input.path)}${ref}`,
+    )
+    if (r.status === 404) return []
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo listDirectory(${input.org}/${input.repo}:${input.path}) -> ${r.status}: ${r.text}`,
+      )
+    }
+    const body = JSON.parse(r.text)
+    if (!Array.isArray(body)) return []
+    return body
+      .filter(
+        (e: { type?: string; name?: string }) =>
+          (e.type === "file" || e.type === "dir") && typeof e.name === "string",
+      )
+      .map((e: { type: string; name: string; path: string; sha: string; size: number }) => ({
+        type: e.type as "file" | "dir",
+        name: e.name,
+        path: e.path,
+        sha: e.sha,
+        size: e.size,
+      }))
+  }
+
+  // Forgejo's "generate from template" — server-side fork that copies
+  // the template repo into a new repo under `target_owner` in a single
+  // commit. Caller must have set `template: true` on the source.
+  async generateFromTemplate(input: {
+    templateOwner: string
+    templateRepo: string
+    targetOwner: string
+    targetName: string
+    description?: string
+    private?: boolean
+  }): Promise<void> {
+    const r = await this.request(
+      "POST",
+      `/api/v1/repos/${encodeURIComponent(input.templateOwner)}/${encodeURIComponent(input.templateRepo)}/generate`,
+      {
+        owner: input.targetOwner,
+        name: input.targetName,
+        description: input.description ?? "",
+        private: input.private ?? false,
+        default_branch: "main",
+        git_content: true,
+        git_hooks: false,
+        labels: false,
+        topics: false,
+        webhooks: false,
+      },
+    )
+    if (r.status !== 201) {
+      throw new Error(
+        `Forgejo generateFromTemplate(${input.templateOwner}/${input.templateRepo} → ${input.targetOwner}/${input.targetName}) -> ${r.status}: ${r.text}`,
+      )
+    }
+  }
+
+  // Promote a repo to template status. Idempotent: 200 either way.
+  async markRepoAsTemplate(org: string, repo: string): Promise<void> {
+    const r = await this.request(
+      "PATCH",
+      `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
+      { template: true },
+    )
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo markRepoAsTemplate(${org}/${repo}) -> ${r.status}: ${r.text}`,
+      )
+    }
+  }
+
   // Toggle the repo's visibility flag. Used so prod deployments can
   // make function repos truly private (today they're always public to
   // keep the runner unauthenticated; per-user auth lands later).

@@ -5,10 +5,10 @@ import { notFound } from "next/navigation"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import {
-  fetchFunctionCode,
+  fetchFunctionFiles,
   fetchFunctions,
   renameFunction,
-  saveFunctionCode,
+  saveFunctionFiles,
   setFunctionVisibility,
   type Func,
 } from "@/lib/api"
@@ -35,14 +35,14 @@ export default async function FunctionDetailPage({
   const fn = fns.find((f) => f.slug === slug)
   if (!fn) notFound()
 
-  // Pulling the handler in parallel with the function row would be
-  // nice, but we need to confirm the function exists + is accessible
-  // first to avoid leaking 404 vs 403 distinctions to the unauthorised
-  // caller.
-  let code: Awaited<ReturnType<typeof fetchFunctionCode>> | null = null
+  // Pulling the editable files in parallel with the function row
+  // would be nice, but we need to confirm the function exists + is
+  // accessible first to avoid leaking 404 vs 403 distinctions to the
+  // unauthorised caller.
+  let filesData: Awaited<ReturnType<typeof fetchFunctionFiles>> | null = null
   let codeError: string | null = null
   try {
-    code = await fetchFunctionCode(cookieHeader, slug)
+    filesData = await fetchFunctionFiles(cookieHeader, slug)
   } catch (err) {
     codeError = (err as Error).message
   }
@@ -69,11 +69,13 @@ export default async function FunctionDetailPage({
     revalidatePath("/services/functions")
   }
 
-  async function saveCodeAction(content: string) {
+  async function saveFilesAction(
+    files: { path: string; content: string }[],
+  ) {
     "use server"
     const cookieHeader = (await headers()).get("cookie") ?? ""
     try {
-      await saveFunctionCode(cookieHeader, slug, content)
+      await saveFunctionFiles(cookieHeader, slug, files)
     } catch (err) {
       return { error: (err as Error).message }
     }
@@ -100,21 +102,22 @@ export default async function FunctionDetailPage({
 
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Code</h2>
-        {code ? (
+        {filesData ? (
           <CodeEditor
-            initialContent={code.content}
-            language={code.language}
-            path={code.path}
-            saveAction={saveCodeAction}
+            initialFiles={filesData.files}
+            defaultFile={filesData.defaultFile}
+            fallbackLanguage={filesData.language}
+            saveAction={saveFilesAction}
           />
         ) : (
           <p className="text-destructive text-sm">
-            Couldn't load handler: {codeError ?? "unknown error"}
+            Couldn't load files: {codeError ?? "unknown error"}
           </p>
         )}
         <p className="text-muted-foreground text-xs">
-          Edits commit straight to the function repo. Dockerfile + workflow
-          live in the repo only — clone via Forgejo to edit them.
+          Editing the {filesData?.folder ?? "user"}/ folder. Dockerfile,
+          runner, and Forgejo Actions workflow live in the repo only —
+          clone via Forgejo to edit them.
         </p>
       </section>
 

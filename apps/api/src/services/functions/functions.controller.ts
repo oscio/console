@@ -62,26 +62,30 @@ export class FunctionsController {
     return this.fns.setVisibility(session.user.id, slug, !!body.public)
   }
 
-  @Get(":slug/code")
-  getCode(
+  @Get(":slug/files")
+  getFiles(
     @Param("slug") slug: string,
     @CurrentSession() session: AppSession,
   ) {
-    return this.fns.getCode(session.user.id, slug)
+    return this.fns.getFiles(session.user.id, slug)
   }
 
-  @Put(":slug/code")
-  updateCode(
+  @Put(":slug/files")
+  updateFiles(
     @Param("slug") slug: string,
-    @Body() body: { content?: string; message?: string },
+    @Body()
+    body: {
+      files?: { path?: string; content?: string }[]
+      message?: string
+    },
     @CurrentSession() session: AppSession,
   ) {
-    return this.fns.updateCode(
-      session.user.id,
-      slug,
-      String(body.content ?? ""),
-      body.message,
-    )
+    const files = (body.files ?? [])
+      .filter((f): f is { path: string; content: string } =>
+        typeof f.path === "string" && typeof f.content === "string",
+      )
+      .map((f) => ({ path: f.path, content: f.content }))
+    return this.fns.updateFiles(session.user.id, slug, files, body.message)
   }
 
   @Patch(":slug")

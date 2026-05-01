@@ -7,6 +7,8 @@ loadDotenv({ path: resolve(__dirname, "../../../.env") })
 import { NestFactory } from "@nestjs/core"
 import { authPool } from "@workspace/auth"
 import { AppModule } from "./app.module"
+import { ForgejoClient } from "./forgejo/forgejo.client"
+import { ensureFunctionTemplates } from "./services/functions/template-bootstrap"
 
 // Lightweight idempotent migration. Runs on every boot — IF NOT
 // EXISTS guards keep it cheap and safe across pod replicas.
@@ -54,6 +56,14 @@ async function bootstrap() {
   app.enableCors({
     origin: process.env.WEB_URL ?? "http://localhost:3000",
     credentials: true,
+  })
+
+  // Materialise function templates into Forgejo. Best-effort: log and
+  // continue if Forgejo isn't reachable — console-api still boots and
+  // function CRUD that doesn't touch templates keeps working.
+  await ensureFunctionTemplates(app.get(ForgejoClient)).catch((err) => {
+    // Logger here would re-create on every retry; keep this terse.
+    console.error("ensureFunctionTemplates failed:", err)
   })
 
   const port = process.env.PORT ?? 3001
