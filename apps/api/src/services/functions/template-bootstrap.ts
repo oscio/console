@@ -4,6 +4,27 @@ import { listTemplates, type FunctionTemplate } from "./templates"
 
 const log = new Logger("FunctionTemplateBootstrap")
 
+// HARBOR_USER / HARBOR_TOKEN are pre-set on the platform org by the
+// forgejo-fork tf module so the runner can `docker push` to Harbor.
+// Function repos live under `service` though, which forgejo-fork
+// doesn't touch — so we mirror the same secrets here at boot. Without
+// this, build.yml fails with `Must provide --username with --password-stdin`.
+async function ensureFunctionOrgSecrets(forgejo: ForgejoClient): Promise<void> {
+  const user = process.env.HARBOR_USER
+  const token = process.env.HARBOR_TOKEN
+  if (!user || !token) {
+    log.warn(
+      "HARBOR_USER/HARBOR_TOKEN env not set — skipping service-org Harbor secret sync",
+    )
+    return
+  }
+  await forgejo.setOrgSecret(forgejo.functionOrg, "HARBOR_USER", user)
+  await forgejo.setOrgSecret(forgejo.functionOrg, "HARBOR_TOKEN", token)
+  log.log(
+    `Synced HARBOR_USER/HARBOR_TOKEN to org ${forgejo.functionOrg}`,
+  )
+}
+
 // Materialise the in-code template definitions into Forgejo template
 // repos under the `service` org so FunctionsService.create can fork
 // from them via the generate-from-template API.
@@ -28,6 +49,9 @@ export async function ensureFunctionTemplates(
     return
   }
   await forgejo.ensureOrg(forgejo.functionOrg)
+  await ensureFunctionOrgSecrets(forgejo).catch((err) =>
+    log.warn(`ensureFunctionOrgSecrets: ${(err as Error).message}`),
+  )
   const templates = listTemplates()
   for (const tpl of templates) {
     try {

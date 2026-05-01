@@ -19,7 +19,10 @@ import {
   deleteFunctionCodeConfigMap,
   deleteKnativeService,
   ensureKnativeService,
+  getRuntimeMode,
   invokeFunction,
+  productionImageRef,
+  setProductionImage,
   syncFunctionCodeConfigMap,
 } from "./function-runtime"
 
@@ -423,6 +426,52 @@ export class FunctionsService {
     // healed by another retry, just return what Kourier said.
     await new Promise((r) => setTimeout(r, 1500))
     return invokeFunction(slug, request)
+  }
+
+  // Deploy flow: swap the Knative Service to a function-specific
+  // built image (one Revision per commit SHA). Different from Save
+  // (= ensureRuntime) which just refreshes the dev-image ConfigMap
+  // mount. Caller is the function owner; we surface 404 to viewers.
+  async deployToProduction(
+    ownerId: string,
+    slug: string,
+  ): Promise<{ image: string; sha: string }> {
+    const owners = await this.fga.listFunctionOwners(slug)
+    if (!owners.includes(ownerId)) {
+      throw new NotFoundException(`function ${slug} not found`)
+    }
+    if (!this.forgejo.enabled) {
+      throw new BadRequestException("Forgejo client is not configured")
+    }
+
+    // Pin to the head commit on main. The Forgejo Actions build runs
+    // on every push and tags the image with the commit SHA, so this
+    // gives us a stable Revision-per-commit story.
+    const sha = await this.forgejo.getBranchHead({
+      org: this.forgejo.functionOrg,
+      repo: slug,
+      branch: "main",
+    })
+    if (!sha) {
+      throw new BadRequestException(
+        `function ${slug} has no main branch — Save first`,
+      )
+    }
+    const image = productionImageRef(slug, sha)
+    await setProductionImage(slug, image)
+    return { image, sha }
+  }
+
+  // Read current runtime mode (dev / prod) + image ref. Used by the
+  // detail page and Editor's Deploy button to label state.
+  async getRuntime(
+    ownerId: string,
+    slug: string,
+  ): Promise<{ mode: "dev" | "prod" | "unknown"; image: string | null }> {
+    if (!(await this.fga.canAccessFunction(ownerId, slug))) {
+      throw new NotFoundException(`function ${slug} not found`)
+    }
+    return getRuntimeMode(slug)
   }
 
   // Pull the current function/* files from Forgejo and re-publish them

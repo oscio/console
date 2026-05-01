@@ -29,6 +29,21 @@ function functionDomain(): string {
   return v
 }
 
+// Image registry prefix the Deploy flow patches Knative Services
+// onto. Each function gets its own image (built by Forgejo Actions
+// from the function repo) under this prefix.
+function functionImagePrefix(): string {
+  const v = process.env.FUNCTION_IMAGE_PREFIX
+  if (!v) {
+    throw new Error("FUNCTION_IMAGE_PREFIX env var is required")
+  }
+  return v.replace(/\/$/, "")
+}
+
+export function productionImageRef(slug: string, sha: string): string {
+  return `${functionImagePrefix()}/${slug}:${sha}`
+}
+
 // Cluster-internal Kourier endpoint console-api proxies through. The
 // in-cluster DNS doesn't depend on the platform domain, so we keep
 // a fallback to the Knative-default service name.
@@ -220,8 +235,28 @@ type KnativeServiceBody = {
 function buildKnativeServiceBody(input: {
   name: string
   slug: string
-  configMap: string
+  // Dev mode: configMap is set + image is the dev runner. Code is
+  // ConfigMap-mounted so saves hot-reload without a build.
+  // Prod mode: image is the function-specific built image, no
+  // ConfigMap (code is baked in). Caller chooses which to pass.
+  configMap?: string
+  image?: string
 }): KnativeServiceBody {
+  const useConfigMap = !!input.configMap && !input.image
+  const image = input.image ?? devImage()
+  const annotations: Record<string, string> = {
+    "agent-platform/code-version": String(Date.now()),
+    "agent-platform/mode": useConfigMap ? "dev" : "prod",
+  }
+  const container: Record<string, unknown> = {
+    image,
+    ports: [{ containerPort: 8080 }],
+  }
+  const volumes: unknown[] = []
+  if (useConfigMap) {
+    container.volumeMounts = [{ name: "code", mountPath: "/app/function" }]
+    volumes.push({ name: "code", configMap: { name: input.configMap } })
+  }
   return {
     apiVersion: "serving.knative.dev/v1",
     kind: "Service",
@@ -235,37 +270,115 @@ function buildKnativeServiceBody(input: {
     },
     spec: {
       template: {
-        metadata: {
-          // Knative reads this as part of the Revision template;
-          // changing it forces a new Revision (= new pod). We bump
-          // it on every ensureKnativeService so a no-op Deploy
-          // still rolls fresh ConfigMap content.
-          annotations: {
-            "agent-platform/code-version": String(Date.now()),
-          },
-        },
+        metadata: { annotations },
         spec: {
-          containers: [
-            {
-              image: devImage(),
-              ports: [{ containerPort: 8080 }],
-              volumeMounts: [
-                {
-                  name: "code",
-                  mountPath: "/app/function",
-                },
-              ],
-            },
-          ],
-          volumes: [
-            {
-              name: "code",
-              configMap: { name: input.configMap },
-            },
-          ],
+          containers: [container],
+          ...(volumes.length > 0 ? { volumes } : {}),
         },
       },
     },
+  }
+}
+
+// Deploy flow: swap the Knative Service to a function-specific built
+// image. Drops the ConfigMap mount (production code is baked in),
+// bumps the code-version annotation so a new Revision rolls.
+export async function setProductionImage(
+  slug: string,
+  imageRef: string,
+): Promise<void> {
+  const custom = k8sCustom()
+  const name = knativeServiceName(slug)
+  const desired = buildKnativeServiceBody({ name, slug, image: imageRef })
+
+  type KsvcShape = {
+    metadata?: {
+      resourceVersion?: string
+      labels?: Record<string, string>
+      annotations?: Record<string, string>
+    }
+    spec?: unknown
+  }
+  let existing: KsvcShape | null = null
+  try {
+    existing = (await custom.getNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      name,
+    })) as KsvcShape
+  } catch (err) {
+    if (!isNotFound(err)) throw err
+  }
+
+  if (existing) {
+    const merged = {
+      ...existing,
+      metadata: {
+        ...existing.metadata,
+        labels: {
+          ...(existing.metadata?.labels ?? {}),
+          ...desired.metadata.labels,
+        },
+      },
+      spec: desired.spec,
+    }
+    await custom.replaceNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      name,
+      body: merged,
+    })
+  } else {
+    await custom.createNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      body: desired,
+    })
+  }
+}
+
+// Read the current Knative Service mode + image. Used by the UI to
+// label the Deploy button and to surface what's currently in prod.
+export async function getRuntimeMode(slug: string): Promise<{
+  mode: "dev" | "prod" | "unknown"
+  image: string | null
+}> {
+  const custom = k8sCustom()
+  try {
+    const res = (await custom.getNamespacedCustomObject({
+      group: "serving.knative.dev",
+      version: "v1",
+      namespace: RESOURCE_NS,
+      plural: "services",
+      name: knativeServiceName(slug),
+    })) as {
+      spec?: {
+        template?: {
+          metadata?: { annotations?: Record<string, string> }
+          spec?: {
+            containers?: Array<{ image?: string }>
+          }
+        }
+      }
+    }
+    const ann = res.spec?.template?.metadata?.annotations ?? {}
+    const image = res.spec?.template?.spec?.containers?.[0]?.image ?? null
+    const mode =
+      ann["agent-platform/mode"] === "prod"
+        ? "prod"
+        : ann["agent-platform/mode"] === "dev"
+          ? "dev"
+          : "unknown"
+    return { mode, image }
+  } catch (err) {
+    if (isNotFound(err)) return { mode: "unknown", image: null }
+    throw err
   }
 }
 

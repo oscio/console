@@ -70,6 +70,22 @@ export class FunctionsController {
     return this.fns.getFiles(session.user.id, slug)
   }
 
+  @Get(":slug/runtime")
+  getRuntime(
+    @Param("slug") slug: string,
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.getRuntime(session.user.id, slug)
+  }
+
+  @Post(":slug/deploy")
+  deploy(
+    @Param("slug") slug: string,
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.deployToProduction(session.user.id, slug)
+  }
+
   @Post(":slug/invoke")
   invoke(
     @Param("slug") slug: string,

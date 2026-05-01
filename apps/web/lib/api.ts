@@ -739,6 +739,45 @@ export type FunctionInvocationResult = {
   body: string
 }
 
+export type FunctionRuntimeStatus = {
+  mode: "dev" | "prod" | "unknown"
+  image: string | null
+}
+
+export async function fetchFunctionRuntime(
+  cookieHeader: string,
+  slug: string,
+): Promise<FunctionRuntimeStatus> {
+  const res = await fetch(
+    `${API_URL}/functions/${encodeURIComponent(slug)}/runtime`,
+    { headers: { cookie: cookieHeader }, cache: "no-store" },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions runtime fetch failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as FunctionRuntimeStatus
+}
+
+export async function deployFunction(
+  cookieHeader: string,
+  slug: string,
+): Promise<{ image: string; sha: string }> {
+  const res = await fetch(
+    `${API_URL}/functions/${encodeURIComponent(slug)}/deploy`,
+    {
+      method: "POST",
+      headers: { cookie: cookieHeader },
+      cache: "no-store",
+    },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`functions deploy failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as { image: string; sha: string }
+}
+
 export async function invokeFunction(
   cookieHeader: string,
   slug: string,

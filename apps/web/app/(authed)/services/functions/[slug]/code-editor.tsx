@@ -116,6 +116,7 @@ export function CodeEditor({
   defaultFile,
   fallbackLanguage,
   saveAction,
+  deployAction,
   rootFolder,
   height = "480px",
 }: {
@@ -123,13 +124,22 @@ export function CodeEditor({
   defaultFile: string
   rootFolder: string
   fallbackLanguage: string
+  // Save = commit to Forgejo + sync to dev runtime ConfigMap. Hot
+  // reload, no image build. Used for the editor iteration loop.
   saveAction: (input: SaveInput) => Promise<{ error?: string } | void>
+  // Deploy = swap the Knative Service to the latest built image
+  // (Forgejo Actions builds on push; this just patches the image
+  // ref). When omitted, the Deploy button is hidden — useful for
+  // contexts that don't want to expose the prod path yet.
+  deployAction?: () => Promise<{ error?: string } | void>
   height?: string
 }) {
   const router = useRouter()
   const { resolvedTheme } = useTheme()
   const [pending, startTransition] = useTransition()
+  const [deploying, startDeployTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
 
   const [files, setFiles] = useState<Record<string, FileEntry>>(() =>
     Object.fromEntries(initialFiles.map((f) => [f.path, f])),
@@ -232,6 +242,9 @@ export function CodeEditor({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {info && (
+            <span className="text-muted-foreground text-xs">{info}</span>
+          )}
           {error && (
             <span className="text-destructive text-xs" role="alert">
               {error}
@@ -239,10 +252,12 @@ export function CodeEditor({
           )}
           <Button
             size="sm"
-            disabled={pending || !isDirty}
+            variant="outline"
+            disabled={pending || deploying || !isDirty}
             onClick={() =>
               startTransition(async () => {
                 setError(null)
+                setInfo(null)
                 const writes = Array.from(dirtyPaths).map((p) => ({
                   path: p,
                   content: files[p]!.content,
@@ -262,12 +277,40 @@ export function CodeEditor({
                   return next
                 })
                 setDeletedPaths(new Set())
+                setInfo("Saved to dev runtime")
                 router.refresh()
               })
             }
+            title="Commit + reload the dev runtime (no image build)"
           >
-            {pending ? "Deploying…" : "Deploy"}
+            {pending ? "Saving…" : "Save"}
           </Button>
+          {deployAction && (
+            <Button
+              size="sm"
+              disabled={pending || deploying || isDirty}
+              onClick={() =>
+                startDeployTransition(async () => {
+                  setError(null)
+                  setInfo(null)
+                  const result = await deployAction()
+                  if (result?.error) {
+                    setError(result.error)
+                    return
+                  }
+                  setInfo("Deployed to production")
+                  router.refresh()
+                })
+              }
+              title={
+                isDirty
+                  ? "Save unsaved changes first"
+                  : "Promote the latest committed code to production (built image, new Knative Revision)"
+              }
+            >
+              {deploying ? "Deploying…" : "Deploy"}
+            </Button>
+          )}
         </div>
       </div>
 

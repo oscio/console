@@ -3,6 +3,7 @@ import { headers } from "next/headers"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import {
+  deployFunction,
   fetchFunctionFiles,
   fetchFunctions,
   invokeFunction,
@@ -43,6 +44,18 @@ export default async function FunctionEditPage({
     const cookieHeader = (await headers()).get("cookie") ?? ""
     try {
       await saveFunctionFiles(cookieHeader, slug, input)
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+    revalidatePath(`/services/functions/${slug}/edit`)
+    revalidatePath(`/services/functions/${slug}`)
+  }
+
+  async function deployAction() {
+    "use server"
+    const cookieHeader = (await headers()).get("cookie") ?? ""
+    try {
+      await deployFunction(cookieHeader, slug)
     } catch (err) {
       return { error: (err as Error).message }
     }
@@ -91,6 +104,7 @@ export default async function FunctionEditPage({
                 fallbackLanguage={filesPayload.language}
                 rootFolder={filesPayload.folder}
                 saveAction={saveFilesAction}
+                deployAction={deployAction}
                 height="100%"
               />
             ) : (

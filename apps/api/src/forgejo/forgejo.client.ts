@@ -243,6 +243,88 @@ export class ForgejoClient {
     }
   }
 
+  // Set an org-level Forgejo Actions secret. Used to give the
+  // `service` org access to the same HARBOR_USER/HARBOR_TOKEN the
+  // `platform` org gets at fork time — without this, function repos
+  // inside `service` can't `docker login` to Harbor and the build
+  // workflow fails with "must provide --username with --password-stdin".
+  async setOrgSecret(
+    org: string,
+    name: string,
+    value: string,
+  ): Promise<void> {
+    const r = await this.request(
+      "PUT",
+      `/api/v1/orgs/${encodeURIComponent(org)}/actions/secrets/${encodeURIComponent(name)}`,
+      { data: value },
+    )
+    // 201 = created, 204 = updated, 200 also seen depending on
+    // version. Anything else is a problem.
+    if (r.status !== 201 && r.status !== 204 && r.status !== 200) {
+      throw new Error(
+        `Forgejo setOrgSecret(${org}/${name}) -> ${r.status}: ${r.text}`,
+      )
+    }
+  }
+
+  // Latest commit SHA on a branch. Used by the Deploy flow to pin
+  // the Knative Service image to a specific git revision.
+  async getBranchHead(input: {
+    org: string
+    repo: string
+    branch: string
+  }): Promise<string | null> {
+    const r = await this.request(
+      "GET",
+      `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/branches/${encodeURIComponent(input.branch)}`,
+    )
+    if (r.status === 404) return null
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo getBranchHead(${input.org}/${input.repo}:${input.branch}) -> ${r.status}: ${r.text}`,
+      )
+    }
+    const body = JSON.parse(r.text) as { commit?: { id?: string } }
+    return body.commit?.id ?? null
+  }
+
+  // Latest workflow run for a repo. Used by the Deploy flow to wait
+  // for the build that pushes the per-commit image to Harbor before
+  // we patch the Knative Service. Returns null when no runs exist.
+  async getLatestWorkflowRun(input: {
+    org: string
+    repo: string
+  }): Promise<{
+    headSha: string
+    status: string
+    displayTitle: string
+  } | null> {
+    const r = await this.request(
+      "GET",
+      `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/actions/tasks?limit=1`,
+    )
+    if (r.status === 404) return null
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo getLatestWorkflowRun(${input.org}/${input.repo}) -> ${r.status}: ${r.text}`,
+      )
+    }
+    const body = JSON.parse(r.text) as {
+      workflow_runs?: Array<{
+        head_sha?: string
+        status?: string
+        display_title?: string
+      }>
+    }
+    const run = body.workflow_runs?.[0]
+    if (!run?.head_sha) return null
+    return {
+      headSha: run.head_sha,
+      status: run.status ?? "",
+      displayTitle: run.display_title ?? "",
+    }
+  }
+
   // Promote a repo to template status. Idempotent: 200 either way.
   async markRepoAsTemplate(org: string, repo: string): Promise<void> {
     const r = await this.request(
