@@ -15,6 +15,14 @@ import {
   FunctionRuntime,
 } from "./functions.types"
 import { getTemplate } from "./templates"
+import {
+  deleteFunctionCodeConfigMap,
+  deleteKnativeService,
+  ensureKnativeService,
+  invokeFunction,
+  syncFunctionCodeConfigMap,
+} from "./function-runtime"
+import { parseRoutes, type DiscoveredRoute } from "./routes-parser"
 
 // `function-` prefix matches the Forgejo repo name: a function whose
 // slug is `function-abcd1234` lives at `service/function-abcd1234`.
@@ -114,6 +122,17 @@ export class FunctionsService {
         description: name,
         private: !isPublic,
       })
+
+      // Stand up the dev runtime alongside the repo: ConfigMap holds
+      // the user folder content, Knative Service mounts it. The
+      // editor's Test tab hits this service. Errors here don't block
+      // create — Forgejo + DB row are already coherent and the
+      // runtime can be retried via Deploy.
+      await this.ensureRuntime(slug, input.runtime).catch((err) =>
+        this.log.warn(
+          `ensureRuntime ${slug}: ${(err as Error).message}`,
+        ),
+      )
     } else {
       this.log.warn(
         `Forgejo client not configured — creating function ${slug} without a repo`,
@@ -345,7 +364,87 @@ export class FunctionsService {
       `UPDATE "function" SET updated_at = now() WHERE slug = $1`,
       [slug],
     )
+    // Re-sync the dev runtime so the running pod picks up the edit.
+    // Best-effort — the repo + commit are already saved, so a sync
+    // failure is recoverable on the next Deploy.
+    await this.ensureRuntime(slug, row.runtime as FunctionRuntime).catch(
+      (err) =>
+        this.log.warn(`ensureRuntime ${slug}: ${(err as Error).message}`),
+    )
     return { commitMessage }
+  }
+
+  // List the routes the dev runner will mount when given the current
+  // function/* contents. Used by the Test tab.
+  async listRoutes(
+    ownerId: string,
+    slug: string,
+  ): Promise<DiscoveredRoute[]> {
+    const filesData = await this.getFiles(ownerId, slug)
+    return parseRoutes(filesData.folder, filesData.files)
+  }
+
+  // Proxy a Test-tab request to the function's dev Knative Service.
+  // canAccessFunction (not just owner) so a public function can be
+  // exercised by anyone signed in.
+  async invoke(
+    ownerId: string,
+    slug: string,
+    request: {
+      method: string
+      path: string
+      headers?: Record<string, string>
+      body?: string
+    },
+  ): Promise<{
+    status: number
+    headers: Record<string, string>
+    body: string
+  }> {
+    if (!(await this.fga.canAccessFunction(ownerId, slug))) {
+      throw new NotFoundException(`function ${slug} not found`)
+    }
+    return invokeFunction(slug, request)
+  }
+
+  // Pull the current function/* files from Forgejo and re-publish them
+  // as a ConfigMap, then bump the Knative Service template so a new
+  // Revision rolls. Idempotent (safe to call repeatedly).
+  private async ensureRuntime(
+    slug: string,
+    runtime: FunctionRuntime,
+  ): Promise<void> {
+    const tpl = getTemplate(runtime)
+    if (!this.forgejo.enabled) return
+
+    // Re-fetch from Forgejo so the ConfigMap matches what's actually
+    // committed (rather than relying on the caller to pass files).
+    const fileEntries: { path: string; content: string }[] = []
+    const queue: string[] = [tpl.userFolder]
+    let visited = 0
+    while (queue.length > 0 && visited < 256) {
+      const dir = queue.shift()!
+      visited++
+      const entries = await this.forgejo.listDirectory({
+        org: this.forgejo.functionOrg,
+        repo: slug,
+        path: dir,
+      })
+      for (const e of entries) {
+        if (e.type === "file") {
+          const f = await this.forgejo.getFileContent({
+            org: this.forgejo.functionOrg,
+            repo: slug,
+            path: e.path,
+          })
+          if (f) fileEntries.push({ path: e.path, content: f.content })
+        } else if (e.type === "dir") {
+          queue.push(e.path)
+        }
+      }
+    }
+    await syncFunctionCodeConfigMap(slug, fileEntries, tpl.userFolder)
+    await ensureKnativeService(slug)
   }
 
   async delete(ownerId: string, slug: string): Promise<void> {
@@ -365,6 +464,9 @@ export class FunctionsService {
         .deleteRepo(this.forgejo.functionOrg, slug)
         .catch((err) => this.log.error(`Forgejo delete ${slug}: ${err}`))
     }
+    // Tear down the dev runtime — both ConfigMap and Knative Service.
+    await deleteKnativeService(slug)
+    await deleteFunctionCodeConfigMap(slug)
   }
 
   // Inverse of create()'s side effects up to but not including the

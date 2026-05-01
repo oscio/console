@@ -4,10 +4,14 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import {
   fetchFunctionFiles,
+  fetchFunctionRoutes,
   fetchFunctions,
+  invokeFunction,
   saveFunctionFiles,
 } from "@/lib/api"
 import { CodeEditor } from "../code-editor"
+import { EditTestTabs } from "./edit-test-tabs"
+import { TestPanel, type InvocationResult } from "./test-panel"
 
 export default async function FunctionEditPage({
   params,
@@ -17,9 +21,6 @@ export default async function FunctionEditPage({
   const { slug } = await params
   const cookieHeader = (await headers()).get("cookie") ?? ""
 
-  // Existence check — the editor route should 404 the same way the
-  // detail page does for unknown slugs, rather than just rendering an
-  // empty editor with a fetch error.
   const fns = await fetchFunctions(cookieHeader)
   if (fns === null) {
     return (
@@ -31,13 +32,12 @@ export default async function FunctionEditPage({
   const fn = fns.find((f) => f.slug === slug)
   if (!fn) notFound()
 
-  let filesData: Awaited<ReturnType<typeof fetchFunctionFiles>> | null = null
-  let codeError: string | null = null
-  try {
-    filesData = await fetchFunctionFiles(cookieHeader, slug)
-  } catch (err) {
-    codeError = (err as Error).message
-  }
+  const [filesData, routes] = await Promise.all([
+    fetchFunctionFiles(cookieHeader, slug).catch((err: Error) => ({
+      error: err.message,
+    })),
+    fetchFunctionRoutes(cookieHeader, slug).catch(() => []),
+  ])
 
   async function saveFilesAction(input: {
     files: { path: string; content: string }[]
@@ -54,6 +54,25 @@ export default async function FunctionEditPage({
     revalidatePath(`/services/functions/${slug}`)
   }
 
+  async function invokeAction(input: {
+    method: string
+    path: string
+    headers: Record<string, string>
+    body: string
+  }): Promise<{ result?: InvocationResult; error?: string }> {
+    "use server"
+    const cookieHeader = (await headers()).get("cookie") ?? ""
+    try {
+      const result = await invokeFunction(cookieHeader, slug, input)
+      return { result }
+    } catch (err) {
+      return { error: (err as Error).message }
+    }
+  }
+
+  const filesError = "error" in filesData ? filesData.error : null
+  const filesPayload = "error" in filesData ? null : filesData
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
       <div className="shrink-0">
@@ -63,31 +82,30 @@ export default async function FunctionEditPage({
         >
           ← Back to {fn.name}
         </Link>
-        <div className="mt-1 flex items-baseline gap-3">
-          <h1 className="text-base font-semibold">{fn.name}</h1>
-          <p className="text-muted-foreground truncate font-mono text-xs">
-            Editing {filesData?.folder ?? "user"}/ — Dockerfile, runner,
-            workflow live in the repo (clone via Forgejo to edit)
-          </p>
-        </div>
+        <h1 className="mt-1 text-base font-semibold">{fn.name}</h1>
       </div>
 
-      {filesData ? (
-        <div className="min-h-0 flex-1">
-          <CodeEditor
-            initialFiles={filesData.files}
-            defaultFile={filesData.defaultFile}
-            fallbackLanguage={filesData.language}
-            rootFolder={filesData.folder}
-            saveAction={saveFilesAction}
-            height="100%"
-          />
-        </div>
-      ) : (
-        <p className="text-destructive text-sm">
-          Couldn't load files: {codeError ?? "unknown error"}
-        </p>
-      )}
+      <div className="min-h-0 flex-1">
+        <EditTestTabs
+          edit={
+            filesPayload ? (
+              <CodeEditor
+                initialFiles={filesPayload.files}
+                defaultFile={filesPayload.defaultFile}
+                fallbackLanguage={filesPayload.language}
+                rootFolder={filesPayload.folder}
+                saveAction={saveFilesAction}
+                height="100%"
+              />
+            ) : (
+              <p className="text-destructive text-sm">
+                Couldn't load files: {filesError ?? "unknown error"}
+              </p>
+            )
+          }
+          test={<TestPanel routes={routes} invokeAction={invokeAction} />}
+        />
+      </div>
     </div>
   )
 }

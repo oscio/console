@@ -70,6 +70,34 @@ export class FunctionsController {
     return this.fns.getFiles(session.user.id, slug)
   }
 
+  @Get(":slug/routes")
+  listRoutes(
+    @Param("slug") slug: string,
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.listRoutes(session.user.id, slug)
+  }
+
+  @Post(":slug/invoke")
+  invoke(
+    @Param("slug") slug: string,
+    @Body()
+    body: {
+      method?: string
+      path?: string
+      headers?: Record<string, string>
+      body?: string
+    },
+    @CurrentSession() session: AppSession,
+  ) {
+    return this.fns.invoke(session.user.id, slug, {
+      method: String(body.method ?? "GET"),
+      path: String(body.path ?? "/"),
+      headers: body.headers ?? {},
+      body: typeof body.body === "string" ? body.body : "",
+    })
+  }
+
   @Put(":slug/files")
   updateFiles(
     @Param("slug") slug: string,
