@@ -647,6 +647,7 @@ export async function setGlobalEnv(
 
 export type Branding = {
   color: string
+  textColor: string
   imageUrl: string
   title: string
   description: string

@@ -20,10 +20,28 @@ export async function GET(request: Request) {
     process.env.KEYCLOAK_ISSUER_URL ??
     "https://auth.dev.openschema.io/realms/platform"
   const clientId = process.env.KEYCLOAK_CLIENT_ID ?? "console"
-  const url = new URL(request.url)
-  const postLogout = `${url.origin}/sign-in`
+
+  // `request.url` on a server route resolves to the internal pod
+  // origin (http://0.0.0.0:3000) which Keycloak rejects as an
+  // invalid redirect_uri. Use the BETTER_AUTH_URL env (= the public
+  // console hostname, already configured for OIDC) instead, with a
+  // fallback to the X-Forwarded-* headers if it isn't set.
+  const publicOrigin = resolvePublicOrigin(request)
+  const postLogout = `${publicOrigin}/sign-in`
   const target = new URL(`${issuer}/protocol/openid-connect/logout`)
   target.searchParams.set("client_id", clientId)
   target.searchParams.set("post_logout_redirect_uri", postLogout)
   return NextResponse.redirect(target.toString())
+}
+
+function resolvePublicOrigin(request: Request): string {
+  const fromEnv = process.env.BETTER_AUTH_URL
+  if (fromEnv) return fromEnv.replace(/\/$/, "")
+  const proto =
+    request.headers.get("x-forwarded-proto") ?? "https"
+  const host =
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    new URL(request.url).host
+  return `${proto}://${host}`
 }

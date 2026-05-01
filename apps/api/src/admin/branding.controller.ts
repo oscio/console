@@ -31,7 +31,8 @@ const COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 const URL_RE = /^https?:\/\/[^\s]+$/
 
 export type Branding = {
-  color: string // hex like #0f0f11; empty string = default
+  color: string // bg, hex like #0f0f11; empty string = default dark
+  textColor: string // foreground, hex; empty string = default white
   imageUrl: string // https://...; empty string = no image
   title: string // wordmark
   description: string // subtitle, hidden on mobile
@@ -39,6 +40,7 @@ export type Branding = {
 
 const DEFAULTS: Branding = {
   color: "",
+  textColor: "",
   imageUrl: "",
   title: "Console",
   description: "",
@@ -59,6 +61,8 @@ export class BrandingController {
   async update(@Body() body: Partial<Branding>): Promise<void> {
     const next: Branding = {
       color: typeof body.color === "string" ? body.color.trim() : "",
+      textColor:
+        typeof body.textColor === "string" ? body.textColor.trim() : "",
       imageUrl:
         typeof body.imageUrl === "string" ? body.imageUrl.trim() : "",
       title:
@@ -72,6 +76,9 @@ export class BrandingController {
     }
     if (next.color && !COLOR_RE.test(next.color)) {
       throw new BadRequestException("color must be a #RGB / #RRGGBB / #RRGGBBAA hex")
+    }
+    if (next.textColor && !COLOR_RE.test(next.textColor)) {
+      throw new BadRequestException("textColor must be a #RGB / #RRGGBB / #RRGGBBAA hex")
     }
     if (next.imageUrl && !URL_RE.test(next.imageUrl)) {
       throw new BadRequestException("imageUrl must start with http:// or https://")
@@ -111,6 +118,7 @@ function decode(data: Record<string, string>): Branding {
   }
   return {
     color: get("color"),
+    textColor: get("textColor"),
     imageUrl: get("imageUrl"),
     title: get("title") || DEFAULTS.title,
     description: get("description"),
@@ -121,6 +129,7 @@ function encode(b: Branding): Record<string, string> {
   const enc = (v: string) => Buffer.from(v, "utf8").toString("base64")
   return {
     color: enc(b.color),
+    textColor: enc(b.textColor),
     imageUrl: enc(b.imageUrl),
     title: enc(b.title),
     description: enc(b.description),

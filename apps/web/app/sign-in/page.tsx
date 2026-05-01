@@ -10,25 +10,22 @@ export default async function SignInPage() {
     branding = await fetchBranding()
   } catch {
     // api unavailable / first-boot → fall back to plain Console.
-    branding = { color: "", imageUrl: "", title: "Console", description: "" }
+    branding = {
+      color: "",
+      textColor: "",
+      imageUrl: "",
+      title: "Console",
+      description: "",
+    }
   }
 
-  // Aside background:
-  //   - admin-set colour → use as-is, white wordmark (admin is
-  //     expected to pick a dark colour; we don't compute luminance)
-  //   - no colour → fall back to `bg-secondary` so the panel flips
-  //     with the system / chosen theme like the rest of the page,
-  //     with `text-foreground` for the wordmark.
-  const useThemedFallback = !branding.color
-  const asideStyle: React.CSSProperties | undefined = branding.color
-    ? { backgroundColor: branding.color }
-    : undefined
-  const wordmarkClass = useThemedFallback
-    ? "text-foreground"
-    : "text-white"
-  const subtitleClass = useThemedFallback
-    ? "text-muted-foreground"
-    : "text-white/85"
+  // Aside is always-dark by design (theme-independent branding stripe).
+  // Defaults: #0f0f11 background, white text. Admins can override
+  // either via /settings; we honour whatever they set even if it
+  // would clash with the other (no luminance check).
+  const asideBg = branding.color || "#0f0f11"
+  const asideFg = branding.textColor || "#ffffff"
+  const asideStyle: React.CSSProperties = { backgroundColor: asideBg }
 
   return (
     <div className="bg-background flex min-h-svh items-center justify-center p-4">
@@ -40,7 +37,7 @@ export default async function SignInPage() {
             colour when one is configured. */}
         <div
           aria-hidden
-          className={`relative sm:min-h-[28rem] ${useThemedFallback ? "bg-secondary" : ""}`}
+          className="relative sm:min-h-[28rem]"
           style={asideStyle}
         >
           {branding.imageUrl ? (
@@ -53,16 +50,12 @@ export default async function SignInPage() {
               }}
             />
           ) : null}
-          <div className="relative p-5">
-            <div
-              className={`text-xl leading-tight font-bold tracking-tight ${wordmarkClass}`}
-            >
+          <div className="relative p-5" style={{ color: asideFg }}>
+            <div className="text-xl leading-tight font-bold tracking-tight">
               {branding.title}
             </div>
             {branding.description ? (
-              <div
-                className={`mt-2 hidden max-w-xs text-sm leading-relaxed sm:block ${subtitleClass}`}
-              >
+              <div className="mt-2 hidden max-w-xs text-sm leading-relaxed opacity-85 sm:block">
                 {branding.description}
               </div>
             ) : null}

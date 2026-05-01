@@ -43,6 +43,7 @@ async function saveBrandingAction(formData: FormData) {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   await saveBranding(cookieHeader, {
     color: String(formData.get("color") ?? "").trim(),
+    textColor: String(formData.get("textColor") ?? "").trim(),
     imageUrl: String(formData.get("imageUrl") ?? "").trim(),
     title: String(formData.get("title") ?? "").trim() || "Console",
     description: String(formData.get("description") ?? "").trim(),
@@ -63,6 +64,7 @@ export default async function SettingsPage() {
   )
   const branding = await fetchBranding(cookieHeader).catch(() => ({
     color: "",
+    textColor: "",
     imageUrl: "",
     title: "Console",
     description: "",
@@ -161,8 +163,27 @@ export default async function SettingsPage() {
                 pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
               />
               <p className="text-muted-foreground text-xs">
-                Hex like <code>#0f0f11</code>. Used when no image URL
-                is set; defaults to <code>#0f0f11</code>.
+                Hex like <code>#0f0f11</code>. Default is dark
+                regardless of the page theme.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="branding-text-color"
+                className="text-sm font-medium"
+              >
+                Text color
+              </label>
+              <Input
+                id="branding-text-color"
+                name="textColor"
+                defaultValue={branding.textColor}
+                placeholder="#ffffff"
+                pattern="^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+              />
+              <p className="text-muted-foreground text-xs">
+                Hex for the title / description. Defaults to
+                <code> #ffffff</code>.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -181,7 +202,7 @@ export default async function SettingsPage() {
                 fill the panel. Leave blank to use the color.
               </p>
             </div>
-            <Button type="submit">Save branding</Button>
+            <Button type="submit">Save</Button>
           </form>
         </CardContent>
       </Card>
