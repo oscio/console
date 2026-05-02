@@ -772,7 +772,17 @@ export type FunctionLifecycle =
   | "unknown"
 
 export function lifecycleFor(s: FunctionRuntimeStatus): FunctionLifecycle {
-  if (!s.latestSha || !s.build) return "draft"
+  // Truly empty repo (no commits): "draft". Templates always seed an
+  // initial commit, so this only fires before generate-from-template
+  // finishes — effectively never in normal use.
+  if (!s.latestSha) return "draft"
+  // Commits exist but no workflow run yet. Right after Create the
+  // workflow_dispatch returns 204 before Forgejo finishes registering
+  // the run, leaving a brief window where this is null. Treating it
+  // as "building" (rather than "draft") avoids the inconsistency
+  // where the detail page sees the run a moment after the list page
+  // and the two flip-flop between Draft and Building.
+  if (!s.build) return "building"
   if (s.build.behind) return "building" // runner still catching up
   const status = s.build.status
   if (
