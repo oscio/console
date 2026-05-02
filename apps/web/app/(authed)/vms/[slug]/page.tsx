@@ -137,13 +137,7 @@ function Details({ vm }: { vm: Vm }) {
       <dt className="text-muted-foreground">Memory</dt>
       <dd className="font-mono">{vm.memory}</dd>
       <dt className="text-muted-foreground">Internal</dt>
-      <dd className="space-y-0.5">
-        <div className="font-mono">{vm.internalUrl}</div>
-        <div className="text-muted-foreground text-xs">
-          pick a port: :8080 code-server, :7681 xterm
-          {vm.imageType === "desktop" ? ", :6901 vnc" : ""}
-        </div>
-      </dd>
+      <dd className="font-mono">{vm.internalUrl}</dd>
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{vm.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
