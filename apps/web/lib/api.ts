@@ -634,6 +634,38 @@ export async function fetchRepos(
   return (await res.json()) as Repo[]
 }
 
+export async function createRepo(
+  cookieHeader: string,
+  input: { name: string },
+): Promise<Repo> {
+  const res = await fetch(`${API_URL}/repos`, {
+    method: "POST",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`repos create failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Repo
+}
+
+export async function deleteRepo(
+  cookieHeader: string,
+  slug: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/repos/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (!res.ok && res.status !== 404) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`repos delete failed: ${res.status} ${text}`)
+  }
+}
+
 // Functions (Services > Functions). Phase-2: each function is backed
 // by a Forgejo repo under the `service` org; visibility (public/
 // private) is FGA-driven via a `user:* viewer` wildcard tuple.

@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 import { Badge } from "@workspace/ui/components/badge"
 import {
@@ -8,8 +9,31 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
-import { fetchRepos } from "@/lib/api"
+import { createRepo, deleteRepo, fetchRepos } from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
+import { DeleteRepoButton, NewRepoForm } from "./new-repo-form"
+
+async function createRepoAction(formData: FormData) {
+  "use server"
+  const cookieHeader = (await headers()).get("cookie") ?? ""
+  const name = String(formData.get("name") ?? "").trim()
+  if (!name) return { error: "name is required" }
+  try {
+    await createRepo(cookieHeader, { name })
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+  revalidatePath("/repos")
+}
+
+async function deleteRepoAction(formData: FormData) {
+  "use server"
+  const slug = String(formData.get("slug") ?? "")
+  if (!slug) return
+  const cookieHeader = (await headers()).get("cookie") ?? ""
+  await deleteRepo(cookieHeader, slug)
+  revalidatePath("/repos")
+}
 
 export default async function ReposPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
@@ -17,13 +41,16 @@ export default async function ReposPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Repos</h1>
-        <p className="text-muted-foreground text-sm">
-          Standalone Forgejo repos. Function-backed repos live under
-          Functions; this page is for general-purpose code (project
-          scaffolds, imported GitHub repos, scratch).
-        </p>
+      <div className="flex items-baseline justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Repos</h1>
+          <p className="text-muted-foreground text-sm">
+            Standalone Forgejo repos. Function-backed repos live under
+            Functions; this page is for general-purpose code (project
+            scaffolds, imported GitHub repos, scratch).
+          </p>
+        </div>
+        {repos !== null && <NewRepoForm action={createRepoAction} />}
       </div>
 
       {repos === null ? (
@@ -36,10 +63,10 @@ export default async function ReposPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>ID</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Clone URL</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -59,9 +86,6 @@ export default async function ReposPage() {
                       repo.name
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-xs">
-                    {repo.slug}
-                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{repo.source}</Badge>
                   </TableCell>
@@ -70,6 +94,12 @@ export default async function ReposPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     <LocalTime iso={repo.createdAt} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <DeleteRepoButton
+                      action={deleteRepoAction}
+                      slug={repo.slug}
+                    />
                   </TableCell>
                 </TableRow>
               ))}
