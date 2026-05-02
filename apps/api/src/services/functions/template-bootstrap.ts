@@ -25,22 +25,19 @@ async function ensureFunctionOrgSecrets(forgejo: ForgejoClient): Promise<void> {
   )
 }
 
-// Materialise the in-code template definitions into Forgejo template
-// repos under the `service` org so FunctionsService.create can fork
-// from them via the generate-from-template API.
+// Ensure the org + per-runtime template repos exist and are flagged
+// as Forgejo templates (so generate-from-template works). The repo
+// content itself is authored separately — push commits to
+// `service/<repoName>` from the on-disk checkout
+// (services/<repoName>/) using your usual git workflow. Console-api
+// never writes file content into these repos: git is the SoT.
 //
-// Strategy:
-//   1. ensure org `service` exists
-//   2. for each runtime template:
-//      a. create the repo if missing (auto_init=true so it has a
-//         default branch we can write into)
-//      b. write each template file (writeFile auto-detects create vs
-//         update via 422 fallback and is content-idempotent at the
-//         API level — Forgejo skips the commit if content matches)
-//      c. PATCH the repo to set `template: true` so generate works
+// On a brand-new cluster the repo will be empty until someone pushes
+// the initial template commit. FunctionsService.create surfaces the
+// resulting Forgejo error if generate-from-template hits an empty
+// repo.
 //
-// Skipped silently when the Forgejo client is disabled (no creds wired
-// yet — bridge state on a fresh dev cluster).
+// Skipped silently when the Forgejo client is disabled.
 export async function ensureFunctionTemplates(
   forgejo: ForgejoClient,
 ): Promise<void> {
@@ -52,14 +49,10 @@ export async function ensureFunctionTemplates(
   await ensureFunctionOrgSecrets(forgejo).catch((err) =>
     log.warn(`ensureFunctionOrgSecrets: ${(err as Error).message}`),
   )
-  const templates = listTemplates()
-  for (const tpl of templates) {
+  for (const tpl of listTemplates()) {
     try {
       await ensureOne(forgejo, tpl)
     } catch (err) {
-      // Don't fail boot — bootstrap errors shouldn't block the rest of
-      // console-api from coming up. Surface the error in logs and let
-      // an admin retry.
       log.error(
         `Failed to bootstrap template ${tpl.repoName}: ${(err as Error).message}`,
       )
@@ -71,15 +64,15 @@ async function ensureOne(
   forgejo: ForgejoClient,
   tpl: FunctionTemplate,
 ): Promise<void> {
-  // Step 1: repo exists. createOrgRepo is the only "create if missing"
-  // path we have today, so we attempt it and tolerate the 422/409 the
-  // existing-repo case returns.
+  // Create empty repo if missing. autoInit:false because a real
+  // template push from the on-disk checkout will land the initial
+  // commit; auto-init would just add a stray README.
   try {
     await forgejo.createOrgRepo({
       org: forgejo.functionOrg,
       name: tpl.repoName,
       description: tpl.description,
-      autoInit: true,
+      autoInit: false,
       private: false,
     })
     log.log(`Created template repo ${forgejo.functionOrg}/${tpl.repoName}`)
@@ -87,18 +80,6 @@ async function ensureOne(
     const msg = (err as Error).message
     if (!/422|409|already.*exists/i.test(msg)) throw err
   }
-
-  // Step 2: seed/update files. writeFile handles create+update.
-  for (const file of tpl.files) {
-    await forgejo.writeFile({
-      org: forgejo.functionOrg,
-      repo: tpl.repoName,
-      path: file.path,
-      content: file.content,
-      message: `template: sync ${file.path}`,
-    })
-  }
-
-  // Step 3: mark as template. Idempotent.
+  // Mark template — idempotent.
   await forgejo.markRepoAsTemplate(forgejo.functionOrg, tpl.repoName)
 }
