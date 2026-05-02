@@ -870,16 +870,12 @@ export class VmsService {
       if (code !== 404) throw err
     }
     const ports = [
-      { name: "code", port: 8080, targetPort: 8080 },
+      { name: "http", port: 8080, targetPort: 8080 },
       { name: "xterm", port: 7681, targetPort: 7681 },
       { name: "webui", port: 8787, targetPort: 8787 },
       ...(imageType === "desktop"
         ? [{ name: "vnc", port: 6901, targetPort: 6901 }]
         : []),
-      // :80 → code-server (8080) as the default surface so the bare
-      // cluster-local hostname (no port) is callable. Other surfaces
-      // keep their explicit ports.
-      { name: "http", port: 80, targetPort: 8080 },
     ]
     try {
       await core.createNamespacedService({
