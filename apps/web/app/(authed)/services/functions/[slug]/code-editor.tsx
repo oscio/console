@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
@@ -149,6 +149,18 @@ export function CodeEditor({
   const { resolvedTheme } = useTheme()
   const [pending, startTransition] = useTransition()
   const [deploying, startDeployTransition] = useTransition()
+
+  // Poll the server to refresh lifecycle while a build is in flight.
+  // RSC won't auto-revalidate after the workflow finishes, so without
+  // this the Deploy button stays "Building…" until the user reloads.
+  // We tick every 5s only when the state is genuinely transitional;
+  // terminal states (deployable, up-to-date, build-failed, ...) don't
+  // poll.
+  useEffect(() => {
+    if (lifecycle !== "building") return
+    const id = setInterval(() => router.refresh(), 5000)
+    return () => clearInterval(id)
+  }, [lifecycle, router])
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
