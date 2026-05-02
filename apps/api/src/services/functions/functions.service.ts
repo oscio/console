@@ -191,6 +191,18 @@ export class FunctionsService {
     if (!owners.includes(ownerId)) {
       throw new NotFoundException(`function ${slug} not found`)
     }
+    // Exposure requires a prod Revision to back the public URL. If
+    // the user hasn't Deployed yet, an HTTPRoute would point at a
+    // non-existent Service and the URL would 404. Off is always
+    // permitted so users can always retract.
+    if (exposed) {
+      const runtime = await getRuntimeMode(slug)
+      if (!runtime.prod.image) {
+        throw new BadRequestException(
+          "Deploy the function before enabling exposure — there's no production Revision to publish yet",
+        )
+      }
+    }
     const result = await authPool.query(
       `UPDATE "function" SET exposed = $1, updated_at = now()
          WHERE slug = $2`,

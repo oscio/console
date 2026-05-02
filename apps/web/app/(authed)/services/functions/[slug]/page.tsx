@@ -148,7 +148,17 @@ export default async function FunctionDetailPage({
                 </Badge>
               }
               exposeToggle={
-                <ExposeToggle initial={fn.exposed} action={exposeAction} />
+                <ExposeToggle
+                  initial={fn.exposed}
+                  action={exposeAction}
+                  // Block exposure until the user has Deployed at least
+                  // once. Without a prod Revision the public URL would
+                  // 404, so the toggle is meaningless before then.
+                  disabled={!runtime?.prod.image}
+                  disabledReason={
+                    !runtime?.prod.image ? "Deploy first" : undefined
+                  }
+                />
               }
             />
           </CardContent>
