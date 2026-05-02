@@ -43,7 +43,14 @@ The platform's runner imports this file once on cold start and calls
 
   event   — dict shaped like AWS API Gateway HTTP API v2
             (event["requestContext"]["http"]["method"] etc.)
-  context — reserved for future trigger metadata; empty dict for now
+  context — dict with platform metadata about the running function:
+              function_name        — slug (e.g. "function-abcd1234")
+              function_arn         — stable identifier for this function
+              function_version     — image tag ("dev" or commit SHA)
+              function_target      — "dev" (Save) or "prod" (Deploy)
+              function_namespace   — k8s namespace
+              function_hostname    — public hostname (live when Exposed)
+              request_id           — unique id for this invocation
 
 Return a dict {statusCode, headers?, body?} and the runner maps it
 back to an HTTP response.
@@ -54,7 +61,10 @@ import json
 def handler(event, context):
     method = event["requestContext"]["http"]["method"]
     if method == "GET":
-        return {"statusCode": 200, "body": json.dumps({"message": "pong"})}
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"message": "pong", "from": context["function_arn"]}),
+        }
     if method == "POST":
         try:
             payload = json.loads(event.get("body") or "{}")
@@ -73,6 +83,8 @@ HTTP response. One repo = one function = one entrypoint.
 """
 import asyncio
 import importlib.util
+import os
+import uuid
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
@@ -86,6 +98,18 @@ ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
 USER_FOLDER = "function"
 HANDLER_FILE = "main.py"
 HANDLER_NAME = "handler"
+
+# Platform metadata baked into the Knative Service env at deploy/save
+# time. Cold-start once and pass through to the handler's \`context\`
+# dict on every invocation.
+FUNCTION_INFO = {
+    "function_name": os.environ.get("OS_FUNCTION_NAME", ""),
+    "function_arn": os.environ.get("OS_FUNCTION_ARN", ""),
+    "function_version": os.environ.get("OS_FUNCTION_VERSION", ""),
+    "function_target": os.environ.get("OS_FUNCTION_TARGET", ""),
+    "function_namespace": os.environ.get("OS_FUNCTION_NAMESPACE", ""),
+    "function_hostname": os.environ.get("OS_FUNCTION_HOSTNAME", ""),
+}
 
 
 def _load_handler() -> Callable | None:
@@ -128,7 +152,8 @@ async def _invoke(request: Request) -> Response:
             },
         },
     }
-    result = HANDLER(event, {})
+    context = {**FUNCTION_INFO, "request_id": str(uuid.uuid4())}
+    result = HANDLER(event, context)
     if asyncio.iscoroutine(result):
         result = await result
     return _to_response(result)

@@ -44,6 +44,18 @@ export function productionImageRef(slug: string, sha: string): string {
   return `${functionImagePrefix()}/${slug}:${sha}`
 }
 
+// Last `:tag` segment of an image ref (handles `host:port/img:sha`
+// vs `img:sha`). Used to surface the deployed git SHA via env so the
+// user's handler can identify its own version.
+function extractTag(image: string): string {
+  const colon = image.lastIndexOf(":")
+  if (colon === -1) return ""
+  // If the colon is inside a `host:port` (no slash after it), there's
+  // no tag — treat as untagged.
+  if (image.indexOf("/", colon) !== -1) return ""
+  return image.slice(colon + 1)
+}
+
 // The hostname Traefik routes to, regardless of whether the function
 // is currently exposed. Mirrors what Knative's domainTemplate is
 // configured to emit so HTTPRoute hostname and Kourier's expected
@@ -273,9 +285,29 @@ function buildKnativeServiceBody(input: {
     "agent-platform/code-version": String(Date.now()),
     "agent-platform/mode": input.mode,
   }
+  // Lambda-style runtime metadata for the user's `handler(event,
+  // context)`. Read from env at runner cold-start; the handler sees
+  // them via the second argument (e.g. context["function_name"]).
+  const env = [
+    { name: "OS_FUNCTION_NAME", value: input.slug },
+    { name: "OS_FUNCTION_TARGET", value: input.mode },
+    { name: "OS_FUNCTION_NAMESPACE", value: RESOURCE_NS },
+    { name: "OS_FUNCTION_HOSTNAME", value: functionHostname(input.slug) },
+    {
+      name: "OS_FUNCTION_ARN",
+      value: `arn:openschema:fn:${functionDomain()}:${RESOURCE_NS}:${input.slug}`,
+    },
+    {
+      name: "OS_FUNCTION_VERSION",
+      // Prod is pinned to a built image:<sha>; dev floats on the
+      // shared dev image so the SHA isn't meaningful there.
+      value: input.mode === "prod" ? extractTag(image) : "dev",
+    },
+  ]
   const container: Record<string, unknown> = {
     image,
     ports: [{ containerPort: 8080 }],
+    env,
   }
   const volumes: unknown[] = []
   if (useConfigMap && input.configMap) {

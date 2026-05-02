@@ -97,7 +97,6 @@ export default async function FunctionEditPage({
         >
           ← Back to {fn.name}
         </Link>
-        <h1 className="mt-1 text-base font-semibold">{fn.name}</h1>
       </div>
 
       <div className="min-h-0 flex-1">
