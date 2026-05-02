@@ -21,6 +21,9 @@ export type LoadBalancer = {
   port: number
   hostname: string
   url: string
+  // Cluster-local URL targeting the LB's ClusterIP Service directly.
+  // Always usable from in-cluster pods, regardless of HTTPRoute state.
+  internalUrl: string
   status: LoadBalancerStatus
   createdAt: string
 }

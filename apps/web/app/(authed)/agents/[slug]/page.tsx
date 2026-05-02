@@ -92,6 +92,22 @@ export default async function AgentDetailPage({
       </section>
 
       <section className="space-y-2">
+        <h2 className="text-lg font-semibold">URLs</h2>
+        <div className="space-y-0.5">
+          <div className="text-muted-foreground text-xs">
+            Internal (cluster-local)
+          </div>
+          <span
+            className={`font-mono text-sm ${
+              isRunning ? "" : "text-muted-foreground"
+            }`}
+          >
+            {agent.internalUrl}
+          </span>
+        </div>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>

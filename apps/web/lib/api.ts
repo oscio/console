@@ -100,6 +100,9 @@ export type Vm = {
   agentType: VmAgentType
   status: VmStatus
   hostname: string
+  // Cluster-local URL of the workspace headless Service (multi-port:
+  // 8080 http / 7681 xterm / 8787 webui / 6901 vnc on desktop).
+  internalUrl: string
   // Resource requests on the workspace container, K8s-native form
   // (e.g. "2", "4Gi"). Surfaced for the VM detail card.
   cpu: string
@@ -217,7 +220,8 @@ export type Agent = {
   status: AgentStatus
   hostname: string
   createdAt: string
-  gatewayUrl: string
+  // Cluster-local URL of the agent's FastAPI wrapper (port 8000).
+  internalUrl: string
   // Set when this agent is a VM sidecar (slug = vm-XXX). null for
   // standalone agents created via /agents directly.
   boundToVm: string | null
@@ -525,6 +529,8 @@ export type LoadBalancer = {
   port: number
   hostname: string
   url: string
+  // Cluster-local URL targeting the LB's ClusterIP Service.
+  internalUrl: string
   status: LoadBalancerStatus
   createdAt: string
 }

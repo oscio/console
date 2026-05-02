@@ -108,6 +108,17 @@ export default async function VmDetailPage({
       </section>
 
       <section className="space-y-2">
+        <h2 className="text-lg font-semibold">URLs</h2>
+        <div className="space-y-0.5">
+          <div className="text-muted-foreground text-xs">
+            Internal (cluster-local — pick a port: 8080 / 7681 / 8787
+            {vm.imageType === "desktop" ? " / 6901" : ""})
+          </div>
+          <span className="font-mono text-sm">{vm.internalUrl}</span>
+        </div>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>

@@ -67,24 +67,41 @@ export default async function LoadBalancerDetailPage({
         <p className="text-muted-foreground font-mono text-xs">{lb.slug}</p>
       </div>
 
-      <section className="space-y-2">
-        <h2 className="text-lg font-semibold">URL</h2>
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">URLs</h2>
         {!isReady && (
           <p className="text-muted-foreground text-xs">
-            URL responds once the target VM has running endpoints.
+            URLs respond once the target VM has running endpoints.
           </p>
         )}
-        <a
-          href={lb.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`inline-flex items-center gap-2 font-mono text-sm ${
-            isReady ? "hover:underline" : "text-muted-foreground"
-          }`}
-        >
-          {lb.url}
-          {isReady && <ArrowSquareOut weight="bold" className="size-4" />}
-        </a>
+        <div className="space-y-2">
+          <div className="space-y-0.5">
+            <div className="text-muted-foreground text-xs">
+              Internal (cluster-local)
+            </div>
+            <span
+              className={`font-mono text-sm ${
+                isReady ? "" : "text-muted-foreground"
+              }`}
+            >
+              {lb.internalUrl}
+            </span>
+          </div>
+          <div className="space-y-0.5">
+            <div className="text-muted-foreground text-xs">External</div>
+            <a
+              href={lb.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`inline-flex items-center gap-2 font-mono text-sm ${
+                isReady ? "hover:underline" : "text-muted-foreground"
+              }`}
+            >
+              {lb.url}
+              {isReady && <ArrowSquareOut weight="bold" className="size-4" />}
+            </a>
+          </div>
+        </div>
       </section>
 
       <section className="space-y-2">

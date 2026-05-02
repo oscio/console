@@ -374,6 +374,7 @@ export class LoadBalancersService {
       port,
       hostname,
       url: `https://${hostname}`,
+      internalUrl: `http://${slug}.${namespace}.svc.cluster.local:${port}`,
       status,
       createdAt,
     }

@@ -21,10 +21,10 @@ export type Agent = {
   status: AgentStatus
   hostname: string
   createdAt: string
-  // Single per-agent launch URL — the agent gateway on port 8000.
-  // Path-routed through oauth2-proxy /oauth2/start the same way
-  // VM URLs are.
-  gatewayUrl: string
+  // Cluster-local URL of the agent's FastAPI wrapper (port 8000).
+  // Always reachable from in-cluster callers — UI / external traffic
+  // goes through the console-api proxy at /agents/<slug>/chat instead.
+  internalUrl: string
   // VM slug this agent rides as a sidecar in, or null for standalone
   // agents. UI uses this to render an "attached to <vm-name>" badge
   // on the /agents listing.

@@ -80,7 +80,6 @@ export class AgentsService {
   private readonly image = process.env.AGENT_IMAGE ?? ""
   private readonly agentsDomain =
     process.env.AGENTS_DOMAIN ?? "agents.localhost"
-  private readonly oauthProxyUrl = process.env.OAUTH_PROXY_URL ?? ""
   private readonly gatewayName =
     process.env.AGENT_GATEWAY_NAME ?? "platform-gateway"
   private readonly gatewayNamespace =
@@ -711,11 +710,6 @@ export class AgentsService {
     return labels
   }
 
-  private launchUrl(target: string): string {
-    if (!this.oauthProxyUrl) return target
-    return `${this.oauthProxyUrl}/oauth2/start?rd=${encodeURIComponent(target)}`
-  }
-
   private toAgent(sts: {
     metadata?: {
       name?: string
@@ -756,9 +750,7 @@ export class AgentsService {
       status,
       hostname,
       createdAt,
-      // Bound agents are reached via /agents/<slug>/chat/... only —
-      // no public hostname plumbed for them yet.
-      gatewayUrl: boundToVm ? "" : this.launchUrl(`https://${hostname}`),
+      internalUrl: `http://${slug}.${namespace}.svc.cluster.local:8000`,
       boundToVm,
     }
   }

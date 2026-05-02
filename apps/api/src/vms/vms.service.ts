@@ -980,6 +980,7 @@ export class VmsService {
       agentType,
       status,
       hostname,
+      internalUrl: `http://${slug}.${namespace}.svc.cluster.local`,
       createdAt,
       cpu,
       memory,
