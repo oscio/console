@@ -819,6 +819,17 @@ export function lifecycleBadge(l: FunctionLifecycle): {
   }
 }
 
+// True once the user has triggered Deploy at least once (i.e. there's
+// a prod Knative Revision behind the function). Exposure / URL UI
+// hangs off this — without a prod Revision neither the cluster-
+// internal nor the public URL points at anything. Driven by the prod
+// image specifically, not the lifecycle: a previously-deployed
+// function whose follow-up build is running/failed is still
+// "deployed" (the old Revision still serves traffic).
+export function isDeployed(s: FunctionRuntimeStatus): boolean {
+  return !!s.prod.image
+}
+
 function extractShaFromImage(image: string | null): string | null {
   if (!image) return null
   const colon = image.lastIndexOf(":")

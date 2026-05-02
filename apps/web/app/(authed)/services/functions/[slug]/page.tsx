@@ -13,6 +13,7 @@ import {
 import {
   fetchFunctionRuntime,
   fetchFunctions,
+  isDeployed,
   lifecycleBadge,
   lifecycleFor,
   renameFunction,
@@ -53,6 +54,11 @@ export default async function FunctionDetailPage({
   )
   const lifecycle = runtime ? lifecycleFor(runtime) : "unknown"
   const lifecycleBadgeProps = lifecycleBadge(lifecycle)
+  // Pre-deploy the function has no prod Revision, so the URL doesn't
+  // resolve and the Internal/Public-URL toggle is meaningless. Drive
+  // most of the bottom sections off this so the UI is honest about
+  // what's actually reachable.
+  const deployed = runtime ? isDeployed(runtime) : false
 
   async function renameAction(formData: FormData) {
     "use server"
@@ -87,9 +93,11 @@ export default async function FunctionDetailPage({
         </Link>
         <div className="mt-2 flex items-center gap-3">
           <RenameForm initialName={fn.name} action={renameAction} />
-          <Badge variant={fn.exposed ? "default" : "outline"}>
-            {fn.exposed ? "Public URL" : "Internal"}
-          </Badge>
+          {deployed && (
+            <Badge variant={fn.exposed ? "default" : "outline"}>
+              {fn.exposed ? "Public URL" : "Internal"}
+            </Badge>
+          )}
         </div>
         <p className="text-muted-foreground font-mono text-xs">{fn.slug}</p>
       </div>
@@ -118,21 +126,30 @@ export default async function FunctionDetailPage({
 
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">URL</h2>
-        {!fn.exposed && (
+        {!deployed ? (
+          <p className="text-muted-foreground text-xs">
+            Not deployed yet — Deploy the function to bring up the
+            production Revision behind this address.
+          </p>
+        ) : !fn.exposed ? (
           <p className="text-muted-foreground text-xs">
             Not exposed — flip Exposure to publish at this address.
           </p>
-        )}
+        ) : null}
         <a
           href={`https://${fn.hostname}`}
           target="_blank"
           rel="noopener noreferrer"
           className={`inline-flex items-center gap-2 font-mono text-sm ${
-            fn.exposed ? "hover:underline" : "text-muted-foreground"
+            deployed && fn.exposed
+              ? "hover:underline"
+              : "text-muted-foreground"
           }`}
         >
           {`https://${fn.hostname}`}
-          {fn.exposed && <ArrowSquareOut weight="bold" className="size-4" />}
+          {deployed && fn.exposed && (
+            <ArrowSquareOut weight="bold" className="size-4" />
+          )}
         </a>
       </section>
 
@@ -154,10 +171,8 @@ export default async function FunctionDetailPage({
                   // Block exposure until the user has Deployed at least
                   // once. Without a prod Revision the public URL would
                   // 404, so the toggle is meaningless before then.
-                  disabled={!runtime?.prod.image}
-                  disabledReason={
-                    !runtime?.prod.image ? "Deploy first" : undefined
-                  }
+                  disabled={!deployed}
+                  disabledReason={!deployed ? "Deploy first" : undefined}
                 />
               }
             />

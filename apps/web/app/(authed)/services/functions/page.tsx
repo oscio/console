@@ -18,6 +18,7 @@ import {
   deleteFunction,
   fetchFunctionRuntime,
   fetchFunctions,
+  isDeployed,
   lifecycleBadge,
   lifecycleFor,
 } from "@/lib/api"
@@ -54,16 +55,34 @@ export default async function FunctionsPage() {
   // build/deploy state, not a hardcoded "Draft". Each call hits Forgejo
   // + Knative, so they run in parallel; an individual failure resolves
   // to "unknown" rather than failing the whole page.
-  const lifecycles: Record<string, FunctionLifecycle> = {}
+  const states: Record<
+    string,
+    { lifecycle: FunctionLifecycle; deployed: boolean }
+  > = {}
   if (fns) {
     const results = await Promise.all(
       fns.map((f) =>
         fetchFunctionRuntime(cookieHeader, f.slug)
-          .then((r) => [f.slug, lifecycleFor(r)] as const)
-          .catch(() => [f.slug, "unknown" as FunctionLifecycle] as const),
+          .then(
+            (r) =>
+              [
+                f.slug,
+                { lifecycle: lifecycleFor(r), deployed: isDeployed(r) },
+              ] as const,
+          )
+          .catch(
+            () =>
+              [
+                f.slug,
+                {
+                  lifecycle: "unknown" as FunctionLifecycle,
+                  deployed: false,
+                },
+              ] as const,
+          ),
       ),
     )
-    for (const [slug, l] of results) lifecycles[slug] = l
+    for (const [slug, s] of results) states[slug] = s
   }
 
   return (
@@ -115,13 +134,19 @@ export default async function FunctionsPage() {
                     <Badge variant="secondary">{fn.runtime}</Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={fn.exposed ? "default" : "outline"}>
-                      {fn.exposed ? "Public URL" : "Internal"}
-                    </Badge>
+                    {states[fn.slug]?.deployed ? (
+                      <Badge variant={fn.exposed ? "default" : "outline"}>
+                        {fn.exposed ? "Public URL" : "Internal"}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {(() => {
-                      const b = lifecycleBadge(lifecycles[fn.slug] ?? "unknown")
+                      const b = lifecycleBadge(
+                        states[fn.slug]?.lifecycle ?? "unknown",
+                      )
                       return <Badge variant={b.variant}>{b.label}</Badge>
                     })()}
                   </TableCell>
