@@ -42,6 +42,13 @@ export class ForgejoClient {
     return `${base}/${this.functionOrg}/${repoName}`
   }
 
+  // Public clone URL — same shape as repoWebUrl but `.git` suffixed
+  // for `git clone`. Empty string when Forgejo isn't configured.
+  repoCloneUrl(repoName: string): string {
+    const web = this.repoWebUrl(repoName)
+    return web ? `${web}.git` : ""
+  }
+
   // Idempotent enough: creates the org if missing. Forgejo returns 422
   // "user already exists" on a duplicate, which we treat as success.
   async ensureOrg(name: string): Promise<void> {

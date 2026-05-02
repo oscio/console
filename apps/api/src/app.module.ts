@@ -7,6 +7,7 @@ import { AgentsModule } from "./agents/agents.module"
 import { OpenFgaModule } from "./openfga/openfga.module"
 import { RoleBindingsModule } from "./role-bindings/role-bindings.module"
 import { LoadBalancersModule } from "./loadbalancers/loadbalancers.module"
+import { ReposModule } from "./repos/repos.module"
 import { FunctionsModule } from "./services/functions/functions.module"
 import { VmsModule } from "./vms/vms.module"
 import { VolumesModule } from "./volumes/volumes.module"
@@ -21,6 +22,7 @@ import { VolumesModule } from "./volumes/volumes.module"
     AgentsModule,
     AgentChatModule,
     LoadBalancersModule,
+    ReposModule,
     FunctionsModule,
     AdminModule,
   ],

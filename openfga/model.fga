@@ -54,3 +54,11 @@ type function
   relations
     define owner: [user]
     define can_access: owner
+
+# Repo ownership (Repos page). Mirrors the function/vm shape — the
+# creator is the owner, only owners can manage. Forgejo holds the
+# actual git data; this just gates console-side actions.
+type repo
+  relations
+    define owner: [user]
+    define can_access: owner

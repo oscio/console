@@ -103,6 +103,9 @@ export class OpenFgaService implements OnModuleInit {
   async listAccessibleFunctions(userId: string): Promise<string[]> {
     return this.listObjects(userId, "can_access", "function")
   }
+  async listAccessibleRepos(userId: string): Promise<string[]> {
+    return this.listObjects(userId, "can_access", "repo")
+  }
 
   // ---- Console-admin convenience -----------------------------------------
   // Note: there is intentionally no platform-admin equivalent. Platform-admin
@@ -288,6 +291,31 @@ export class OpenFgaService implements OnModuleInit {
     return this.check(userKey(userId), "can_access", functionKey(slug))
   }
 
+  // ---- Repo (standalone Forgejo repos managed via /repos page) ----
+
+  async grantRepoOwner(slug: string, userId: string): Promise<void> {
+    await this.write([
+      { user: userKey(userId), relation: "owner", object: repoKey(slug) },
+    ])
+  }
+
+  async revokeRepoOwner(slug: string, userId: string): Promise<void> {
+    await this.deleteTuples([
+      { user: userKey(userId), relation: "owner", object: repoKey(slug) },
+    ])
+  }
+
+  async listRepoOwners(slug: string): Promise<string[]> {
+    const subjects = await this.listSubjects("owner", repoKey(slug))
+    return subjects
+      .filter((s) => s.startsWith("user:"))
+      .map((s) => s.slice("user:".length))
+  }
+
+  async canAccessRepo(userId: string, slug: string): Promise<boolean> {
+    return this.check(userKey(userId), "can_access", repoKey(slug))
+  }
+
   // -------------------------------------------------------------------------
 
   private async post(path: string, body: unknown): Promise<any> {
@@ -326,6 +354,10 @@ export function lbKey(slug: string): string {
 
 export function functionKey(slug: string): string {
   return `function:${slug}`
+}
+
+export function repoKey(slug: string): string {
+  return `repo:${slug}`
 }
 
 async function readDevEnvFile(path: string): Promise<Record<string, string>> {

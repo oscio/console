@@ -605,6 +605,35 @@ export async function renameLoadBalancer(
   }
 }
 
+// Standalone Forgejo repos managed via /repos. Distinct from
+// function-backed repos (those live in the function table and are
+// surfaced under /services/functions).
+
+export type RepoSource = "forgejo" | "github-import"
+
+export type Repo = {
+  id: string
+  slug: string
+  name: string
+  owner: string
+  source: RepoSource
+  forgejoUrl: string
+  cloneUrl: string
+  createdAt: string
+}
+
+export async function fetchRepos(
+  cookieHeader: string,
+): Promise<Repo[] | null> {
+  const res = await fetch(`${API_URL}/repos`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (res.status === 401 || res.status === 403) return null
+  if (!res.ok) throw new Error(`repos list failed: ${res.status}`)
+  return (await res.json()) as Repo[]
+}
+
 // Functions (Services > Functions). Phase-2: each function is backed
 // by a Forgejo repo under the `service` org; visibility (public/
 // private) is FGA-driven via a `user:* viewer` wildcard tuple.

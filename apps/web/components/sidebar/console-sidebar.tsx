@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import {
   Database,
   Gauge,
+  GitBranch,
   IdentificationCard,
   Lightning,
   Network,
@@ -47,6 +48,10 @@ const RESOURCES: NavItem[] = [
 
 const SERVICES: NavItem[] = [
   { href: "/services/functions", label: "Functions", icon: Lightning },
+]
+
+const CODE: NavItem[] = [
+  { href: "/repos", label: "Repos", icon: GitBranch },
 ]
 
 const SETTINGS_ITEM: NavItem = {
@@ -120,6 +125,17 @@ export function ConsoleSidebar({
           <SidebarGroupContent>
             <SidebarMenu>
               {SERVICES.map((item) => (
+                <NavLink key={item.href} item={item} pathname={pathname} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Code</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {CODE.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </SidebarMenu>
