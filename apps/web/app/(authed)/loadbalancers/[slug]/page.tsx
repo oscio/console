@@ -67,48 +67,11 @@ export default async function LoadBalancerDetailPage({
         <p className="text-muted-foreground font-mono text-xs">{lb.slug}</p>
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">URLs</h2>
-        {!isReady && (
-          <p className="text-muted-foreground text-xs">
-            URLs respond once the target VM has running endpoints.
-          </p>
-        )}
-        <div className="space-y-2">
-          <div className="space-y-0.5">
-            <div className="text-muted-foreground text-xs">
-              Internal (cluster-local)
-            </div>
-            <span
-              className={`font-mono text-sm ${
-                isReady ? "" : "text-muted-foreground"
-              }`}
-            >
-              {lb.internalUrl}
-            </span>
-          </div>
-          <div className="space-y-0.5">
-            <div className="text-muted-foreground text-xs">External</div>
-            <a
-              href={lb.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`inline-flex items-center gap-2 font-mono text-sm ${
-                isReady ? "hover:underline" : "text-muted-foreground"
-              }`}
-            >
-              {lb.url}
-              {isReady && <ArrowSquareOut weight="bold" className="size-4" />}
-            </a>
-          </div>
-        </div>
-      </section>
-
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>
-            <Details lb={lb} />
+            <Details lb={lb} isReady={isReady} />
           </CardContent>
         </Card>
       </section>
@@ -116,7 +79,7 @@ export default async function LoadBalancerDetailPage({
   )
 }
 
-function Details({ lb }: { lb: LoadBalancer }) {
+function Details({ lb, isReady }: { lb: LoadBalancer; isReady: boolean }) {
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
       <dt className="text-muted-foreground">ID</dt>
@@ -136,8 +99,26 @@ function Details({ lb }: { lb: LoadBalancer }) {
       </dd>
       <dt className="text-muted-foreground">Target port</dt>
       <dd className="font-mono">{lb.port}</dd>
-      <dt className="text-muted-foreground">Hostname</dt>
-      <dd className="font-mono">{lb.hostname}</dd>
+      <dt className="text-muted-foreground">Internal</dt>
+      <dd
+        className={`font-mono ${isReady ? "" : "text-muted-foreground"}`}
+      >
+        {lb.internalUrl}
+      </dd>
+      <dt className="text-muted-foreground">External</dt>
+      <dd>
+        <a
+          href={lb.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`inline-flex items-center gap-2 font-mono ${
+            isReady ? "hover:underline" : "text-muted-foreground"
+          }`}
+        >
+          {lb.url}
+          {isReady && <ArrowSquareOut weight="bold" className="size-4" />}
+        </a>
+      </dd>
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{lb.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>

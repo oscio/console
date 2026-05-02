@@ -92,26 +92,10 @@ export default async function AgentDetailPage({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">URLs</h2>
-        <div className="space-y-0.5">
-          <div className="text-muted-foreground text-xs">
-            Internal (cluster-local)
-          </div>
-          <span
-            className={`font-mono text-sm ${
-              isRunning ? "" : "text-muted-foreground"
-            }`}
-          >
-            {agent.internalUrl}
-          </span>
-        </div>
-      </section>
-
-      <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>
-            <Details agent={agent} />
+            <Details agent={agent} isRunning={isRunning} />
           </CardContent>
         </Card>
       </section>
@@ -119,7 +103,13 @@ export default async function AgentDetailPage({
   )
 }
 
-function Details({ agent }: { agent: Agent }) {
+function Details({
+  agent,
+  isRunning,
+}: {
+  agent: Agent
+  isRunning: boolean
+}) {
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
       <dt className="text-muted-foreground">ID</dt>
@@ -145,6 +135,12 @@ function Details({ agent }: { agent: Agent }) {
           </dd>
         </>
       ) : null}
+      <dt className="text-muted-foreground">Internal</dt>
+      <dd
+        className={`font-mono ${isRunning ? "" : "text-muted-foreground"}`}
+      >
+        {agent.internalUrl}
+      </dd>
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{agent.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>

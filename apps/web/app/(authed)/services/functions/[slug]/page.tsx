@@ -121,57 +121,13 @@ export default async function FunctionDetailPage({
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">URLs</h2>
-        {!deployed ? (
-          <p className="text-muted-foreground text-xs">
-            Not deployed yet — Deploy to bring up the production
-            Revision behind these addresses.
-          </p>
-        ) : null}
-        <div className="space-y-2">
-          <div className="space-y-0.5">
-            <div className="text-muted-foreground text-xs">
-              Internal (cluster-local)
-            </div>
-            <span
-              className={`font-mono text-sm ${
-                deployed ? "" : "text-muted-foreground"
-              }`}
-            >
-              {fn.internalUrl}
-            </span>
-          </div>
-          <div className="space-y-0.5">
-            <div className="text-muted-foreground text-xs">
-              External
-              {deployed && !fn.exposed ? " — flip Exposure to publish" : ""}
-            </div>
-            <a
-              href={`https://${fn.hostname}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`inline-flex items-center gap-2 font-mono text-sm ${
-                deployed && fn.exposed
-                  ? "hover:underline"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {`https://${fn.hostname}`}
-              {deployed && fn.exposed && (
-                <ArrowSquareOut weight="bold" className="size-4" />
-              )}
-            </a>
-          </div>
-        </div>
-      </section>
-
       <section className="space-y-2">
         <h2 className="text-lg font-semibold">Details</h2>
         <Card>
           <CardContent>
             <Details
               fn={fn}
+              deployed={deployed}
               statusBadge={
                 deployed ? (
                   <Badge variant="default">Deployed</Badge>
@@ -200,10 +156,12 @@ export default async function FunctionDetailPage({
 
 function Details({
   fn,
+  deployed,
   statusBadge,
   exposeToggle,
 }: {
   fn: Func
+  deployed: boolean
   statusBadge: React.ReactNode
   exposeToggle: React.ReactNode
 }) {
@@ -219,8 +177,30 @@ function Details({
       <dd>{statusBadge}</dd>
       <dt className="text-muted-foreground">Exposure</dt>
       <dd>{exposeToggle}</dd>
-      <dt className="text-muted-foreground">Hostname</dt>
-      <dd className="font-mono">{fn.hostname}</dd>
+      <dt className="text-muted-foreground">Internal</dt>
+      <dd
+        className={`font-mono ${deployed ? "" : "text-muted-foreground"}`}
+      >
+        {fn.internalUrl}
+      </dd>
+      <dt className="text-muted-foreground">External</dt>
+      <dd>
+        <a
+          href={`https://${fn.hostname}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`inline-flex items-center gap-2 font-mono ${
+            deployed && fn.exposed
+              ? "hover:underline"
+              : "text-muted-foreground"
+          }`}
+        >
+          {`https://${fn.hostname}`}
+          {deployed && fn.exposed && (
+            <ArrowSquareOut weight="bold" className="size-4" />
+          )}
+        </a>
+      </dd>
       <dt className="text-muted-foreground">Namespace</dt>
       <dd className="font-mono">{fn.namespace}</dd>
       <dt className="text-muted-foreground">Created</dt>
