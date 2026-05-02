@@ -11,7 +11,10 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 import {
+  fetchFunctionRuntime,
   fetchFunctions,
+  lifecycleBadge,
+  lifecycleFor,
   renameFunction,
   setFunctionExposed,
   type Func,
@@ -42,6 +45,14 @@ export default async function FunctionDetailPage({
   }
   const fn = fns.find((f) => f.slug === slug)
   if (!fn) notFound()
+  // Status badge reflects the live lifecycle (Saved/Building/Live/...),
+  // not a stored column. Best-effort — a runtime fetch error falls back
+  // to "Unknown" rather than failing the whole page.
+  const runtime = await fetchFunctionRuntime(cookieHeader, slug).catch(
+    () => null,
+  )
+  const lifecycle = runtime ? lifecycleFor(runtime) : "unknown"
+  const lifecycleBadgeProps = lifecycleBadge(lifecycle)
 
   async function renameAction(formData: FormData) {
     "use server"
@@ -131,6 +142,11 @@ export default async function FunctionDetailPage({
           <CardContent>
             <Details
               fn={fn}
+              statusBadge={
+                <Badge variant={lifecycleBadgeProps.variant}>
+                  {lifecycleBadgeProps.label}
+                </Badge>
+              }
               exposeToggle={
                 <ExposeToggle initial={fn.exposed} action={exposeAction} />
               }
@@ -144,9 +160,11 @@ export default async function FunctionDetailPage({
 
 function Details({
   fn,
+  statusBadge,
   exposeToggle,
 }: {
   fn: Func
+  statusBadge: React.ReactNode
   exposeToggle: React.ReactNode
 }) {
   return (
@@ -158,9 +176,7 @@ function Details({
         <Badge variant="secondary">{fn.runtime}</Badge>
       </dd>
       <dt className="text-muted-foreground">Status</dt>
-      <dd>
-        <Badge variant="outline">{fn.status}</Badge>
-      </dd>
+      <dd>{statusBadge}</dd>
       <dt className="text-muted-foreground">Exposure</dt>
       <dd>{exposeToggle}</dd>
       <dt className="text-muted-foreground">Hostname</dt>

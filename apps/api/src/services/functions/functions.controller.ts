@@ -48,7 +48,7 @@ export class FunctionsController {
   ) {
     return this.fns.create(session.user.id, {
       name: (body.name ?? "").toString(),
-      runtime: (body.runtime ?? "node20") as FunctionRuntime,
+      runtime: (body.runtime ?? "python3.12") as FunctionRuntime,
     })
   }
 

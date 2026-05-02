@@ -115,6 +115,7 @@ type Lifecycle =
   | "draft"
   | "building"
   | "build-failed"
+  | "never-deployed"
   | "deployable"
   | "up-to-date"
   | "unknown"
@@ -384,7 +385,7 @@ export function CodeEditor({
 // Gate the Deploy button + label/tooltip on the function's
 // Saved → Building → Deployable → Deployed lifecycle.
 function canDeploy(l: Lifecycle): boolean {
-  return l === "deployable"
+  return l === "deployable" || l === "never-deployed"
 }
 
 function deployLabel(l: Lifecycle): string {
@@ -394,7 +395,7 @@ function deployLabel(l: Lifecycle): string {
     case "build-failed":
       return "Build failed"
     case "up-to-date":
-      return "Up to date"
+      return "Deployed"
     default:
       return "Deploy"
   }
@@ -411,6 +412,8 @@ function deployTooltip(l: Lifecycle, isDirty: boolean): string {
       return "Latest build failed — fix the code and Save again"
     case "up-to-date":
       return "Production is already pinned to the latest commit"
+    case "never-deployed":
+      return "Build is ready — click Deploy to publish your first Revision"
     case "deployable":
       return "Promote the latest commit's image to production"
     default:

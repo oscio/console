@@ -525,13 +525,23 @@ export class FunctionsService {
           repo: slug,
           branch: "main",
         })
-        .catch(() => null),
+        .catch((err) => {
+          this.log.warn(
+            `getBranchHead ${slug}: ${(err as Error).message}`,
+          )
+          return null
+        }),
       this.forgejo
         .getLatestWorkflowRun({
           org: this.forgejo.functionOrg,
           repo: slug,
         })
-        .catch(() => null),
+        .catch((err) => {
+          this.log.warn(
+            `getLatestWorkflowRun ${slug}: ${(err as Error).message}`,
+          )
+          return null
+        }),
     ])
     let build: {
       sha: string
@@ -637,7 +647,6 @@ export class FunctionsService {
       name: row.name,
       owner: row.owner_id,
       runtime: row.runtime as FunctionRuntime,
-      status: "Draft",
       exposed: row.exposed,
       hostname: functionHostname(row.slug),
       exposedUrl: row.exposed ? exposedUrl(row.slug) : "",

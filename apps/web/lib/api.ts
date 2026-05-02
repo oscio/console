@@ -603,9 +603,8 @@ export async function renameLoadBalancer(
 // by a Forgejo repo under the `service` org; visibility (public/
 // private) is FGA-driven via a `user:* viewer` wildcard tuple.
 
-export const FUNCTION_RUNTIMES = ["node20", "python3.12"] as const
+export const FUNCTION_RUNTIMES = ["python3.12"] as const
 export type FunctionRuntime = (typeof FUNCTION_RUNTIMES)[number]
-export type FunctionStatus = "Draft"
 
 export type Func = {
   id: string
@@ -613,7 +612,6 @@ export type Func = {
   name: string
   owner: string
   runtime: FunctionRuntime
-  status: FunctionStatus
   // Whether the function is reachable from outside the cluster at
   // <slug>.fn.<domain>. No auth — public means literally public.
   exposed: boolean
@@ -768,7 +766,8 @@ export type FunctionLifecycle =
   | "draft" // no build run found yet
   | "building" // run for latest sha is in progress (or queued)
   | "build-failed" // run for latest sha failed/cancelled
-  | "deployable" // build green; latestSha differs from prod
+  | "never-deployed" // build green but user has never triggered Deploy
+  | "deployable" // build green; latestSha differs from prod (re-deploy)
   | "up-to-date" // build green; prod matches latestSha
   | "unknown"
 
@@ -783,9 +782,41 @@ export function lifecycleFor(s: FunctionRuntimeStatus): FunctionLifecycle {
   )
     return "building"
   if (status !== "success") return "build-failed"
+  // Hold the displayed status at draft-equivalent until the user
+  // actively triggers Deploy. A green build alone shouldn't graduate
+  // the function — Deploy is the explicit step that puts a Revision
+  // behind the production URL. We still enable the button (see
+  // canDeploy) so the user can act, but the badge stays at "Draft".
   const prodSha = extractShaFromImage(s.prod.image)
-  if (prodSha && prodSha === s.latestSha) return "up-to-date"
+  if (!prodSha) return "never-deployed"
+  if (prodSha === s.latestSha) return "up-to-date"
   return "deployable"
+}
+
+// Human-readable label + matching badge variant for the Status badge.
+// Centralised so the list page and detail page agree on phrasing.
+export function lifecycleBadge(l: FunctionLifecycle): {
+  label: string
+  variant: "default" | "secondary" | "destructive" | "outline"
+} {
+  switch (l) {
+    case "up-to-date":
+      return { label: "Deployed", variant: "default" }
+    case "deployable":
+      return { label: "Deployable", variant: "secondary" }
+    case "building":
+      return { label: "Building", variant: "secondary" }
+    case "build-failed":
+      return { label: "Build failed", variant: "destructive" }
+    // never-deployed = "build green but user hasn't triggered Deploy
+    // yet". Displayed identically to draft to encourage the user to
+    // click Deploy as the explicit graduation step.
+    case "never-deployed":
+    case "draft":
+      return { label: "Draft", variant: "outline" }
+    case "unknown":
+      return { label: "Unknown", variant: "outline" }
+  }
 }
 
 function extractShaFromImage(image: string | null): string | null {

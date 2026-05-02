@@ -12,10 +12,14 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import {
+  type FunctionLifecycle,
   type FunctionRuntime,
   createFunction,
   deleteFunction,
+  fetchFunctionRuntime,
   fetchFunctions,
+  lifecycleBadge,
+  lifecycleFor,
 } from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
 import { DeleteFunctionButton, NewFunctionForm } from "./new-function-form"
@@ -24,7 +28,7 @@ async function createFunctionAction(formData: FormData) {
   "use server"
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const name = String(formData.get("name") ?? "").trim()
-  const runtime = String(formData.get("runtime") ?? "node20") as FunctionRuntime
+  const runtime = String(formData.get("runtime") ?? "python3.12") as FunctionRuntime
   if (!name) return { error: "name is required" }
   try {
     await createFunction(cookieHeader, { name, runtime })
@@ -46,6 +50,21 @@ async function deleteFunctionAction(formData: FormData) {
 export default async function FunctionsPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const fns = await fetchFunctions(cookieHeader)
+  // Pull the live lifecycle for each row so the Status badge reflects
+  // build/deploy state, not a hardcoded "Draft". Each call hits Forgejo
+  // + Knative, so they run in parallel; an individual failure resolves
+  // to "unknown" rather than failing the whole page.
+  const lifecycles: Record<string, FunctionLifecycle> = {}
+  if (fns) {
+    const results = await Promise.all(
+      fns.map((f) =>
+        fetchFunctionRuntime(cookieHeader, f.slug)
+          .then((r) => [f.slug, lifecycleFor(r)] as const)
+          .catch(() => [f.slug, "unknown" as FunctionLifecycle] as const),
+      ),
+    )
+    for (const [slug, l] of results) lifecycles[slug] = l
+  }
 
   return (
     <div className="space-y-6">
@@ -101,7 +120,10 @@ export default async function FunctionsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{fn.status}</Badge>
+                    {(() => {
+                      const b = lifecycleBadge(lifecycles[fn.slug] ?? "unknown")
+                      return <Badge variant={b.variant}>{b.label}</Badge>
+                    })()}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     <LocalTime iso={fn.createdAt} />

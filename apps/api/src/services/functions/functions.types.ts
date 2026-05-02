@@ -3,10 +3,8 @@
 // org `service`. The `exposed` column controls whether a public
 // HTTPRoute is wired up (no auth — anyone with the URL can call).
 
-export const FUNCTION_RUNTIMES = ["node20", "python3.12"] as const
+export const FUNCTION_RUNTIMES = ["python3.12"] as const
 export type FunctionRuntime = (typeof FUNCTION_RUNTIMES)[number]
-
-export type FunctionStatus = "Draft"
 
 export type Func = {
   id: string
@@ -14,7 +12,6 @@ export type Func = {
   name: string
   owner: string
   runtime: FunctionRuntime
-  status: FunctionStatus
   // Whether the function is reachable at <slug>.fn.<domain> from
   // outside the cluster. Off by default; toggled by the owner from
   // the detail page. No auth — public means literally public.

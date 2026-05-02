@@ -268,9 +268,6 @@ const PYTHON_TEMPLATE: FunctionTemplate = {
 
 const TEMPLATES: Record<FunctionRuntime, FunctionTemplate> = {
   "python3.12": PYTHON_TEMPLATE,
-  // node20 not yet ported to the new layout. Falls back to the
-  // python template until someone authors a Node equivalent.
-  node20: PYTHON_TEMPLATE,
 }
 
 export function getTemplate(runtime: FunctionRuntime): FunctionTemplate {

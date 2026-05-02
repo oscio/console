@@ -31,7 +31,7 @@ export function NewFunctionForm({ action }: { action: Action }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-  const [runtime, setRuntime] = useState<FunctionRuntime>("node20")
+  const [runtime, setRuntime] = useState<FunctionRuntime>("python3.12")
 
   return (
     <Dialog
