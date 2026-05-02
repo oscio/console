@@ -23,7 +23,10 @@ import {
 // reads by name — adding an arbitrary key would just sit unused.
 // Admins edit the value of each predefined key and Save.
 
-const RESERVED: { key: string }[] = [{ key: "OPENROUTER_API_KEY" }]
+const RESERVED: { key: string }[] = [
+  { key: "OPENROUTER_API_KEY" },
+  { key: "RESEND_API_KEY" },
+]
 
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
