@@ -7,6 +7,7 @@ import {
 import { randomBytes } from "node:crypto"
 import { authPool } from "@workspace/auth"
 import { ForgejoClient } from "../../forgejo/forgejo.client"
+import { HarborClient } from "../../harbor/harbor.client"
 import { OpenFgaService } from "../../openfga/openfga.service"
 import {
   CreateFunctionInput,
@@ -56,6 +57,7 @@ export class FunctionsService {
   constructor(
     private readonly fga: OpenFgaService,
     private readonly forgejo: ForgejoClient,
+    private readonly harbor: HarborClient,
   ) {}
 
   // listAll — admin path. No FGA filter.
@@ -640,6 +642,14 @@ export class FunctionsService {
       await this.forgejo
         .deleteRepo(this.forgejo.functionOrg, slug)
         .catch((err) => this.log.error(`Forgejo delete ${slug}: ${err}`))
+    }
+    // Drop every per-commit image from Harbor so abandoned tags don't
+    // accumulate. Best-effort — failure here is logged, not fatal,
+    // because the function record is already gone.
+    if (this.harbor.enabled) {
+      await this.harbor
+        .deleteFunctionRepo(slug)
+        .catch((err) => this.log.error(`Harbor delete ${slug}: ${err}`))
     }
     // Tear down the runtime — Knative Services + ConfigMap + the
     // public HTTPRoute (no-op if exposed was off).
