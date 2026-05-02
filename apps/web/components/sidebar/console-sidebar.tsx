@@ -44,13 +44,10 @@ const RESOURCES: NavItem[] = [
   { href: "/volumes", label: "Volumes", icon: Database },
   { href: "/loadbalancers", label: "Load Balancers", icon: Network },
   { href: "/agents", label: "Agents", icon: Robot },
-]
-
-const SERVICES: NavItem[] = [
   { href: "/services/functions", label: "Functions", icon: Lightning },
 ]
 
-const CODE: NavItem[] = [
+const PROJECTS: NavItem[] = [
   { href: "/repos", label: "Repos", icon: GitBranch },
 ]
 
@@ -121,21 +118,10 @@ export function ConsoleSidebar({
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Services</SidebarGroupLabel>
+          <SidebarGroupLabel>Projects</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {SERVICES.map((item) => (
-                <NavLink key={item.href} item={item} pathname={pathname} />
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Code</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {CODE.map((item) => (
+              {PROJECTS.map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </SidebarMenu>
