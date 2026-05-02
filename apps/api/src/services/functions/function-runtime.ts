@@ -288,15 +288,13 @@ function buildKnativeServiceBody(input: {
   // Lambda-style runtime metadata for the user's `handler(event,
   // context)`. Read from env at runner cold-start; the handler sees
   // them via the second argument (e.g. context["function_name"]).
+  // function_uri is the function's would-be public URL — always
+  // populated, but only resolves externally when Exposed.
   const env = [
     { name: "OS_FUNCTION_NAME", value: input.slug },
     { name: "OS_FUNCTION_TARGET", value: input.mode },
     { name: "OS_FUNCTION_NAMESPACE", value: RESOURCE_NS },
-    { name: "OS_FUNCTION_HOSTNAME", value: functionHostname(input.slug) },
-    {
-      name: "OS_FUNCTION_ARN",
-      value: `arn:openschema:fn:${functionDomain()}:${RESOURCE_NS}:${input.slug}`,
-    },
+    { name: "OS_FUNCTION_URI", value: exposedUrl(input.slug) },
     {
       name: "OS_FUNCTION_VERSION",
       // Prod is pinned to a built image:<sha>; dev floats on the
