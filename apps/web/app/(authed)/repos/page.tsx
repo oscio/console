@@ -77,8 +77,12 @@ export default async function ReposPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
   const [repos, sources] = await Promise.all([
     fetchRepos(cookieHeader),
-    fetchRepoSources(cookieHeader).catch(() => []),
+    fetchRepoSources(cookieHeader).catch((err: unknown) => {
+      console.error("[/repos] fetchRepoSources failed:", err)
+      return []
+    }),
   ])
+  console.log("[/repos] sources count:", sources.length)
 
   return (
     <div className="space-y-6">
