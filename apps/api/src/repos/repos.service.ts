@@ -1,18 +1,7 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common"
-import { authPool } from "@workspace/auth"
-import { ForgejoClient } from "../forgejo/forgejo.client"
+import { ForgejoClient, RepoMetadata } from "../forgejo/forgejo.client"
 import { OpenFgaService } from "../openfga/openfga.service"
 import { Repo, RepoSource } from "./repos.types"
-
-type Row = {
-  slug: string
-  owner_id: string
-  name: string
-  source: string
-  created_at: Date
-}
-
-const ROW_COLUMNS = `slug, owner_id, name, source, created_at`
 
 @Injectable()
 export class ReposService {
@@ -22,61 +11,87 @@ export class ReposService {
     private readonly forgejo: ForgejoClient,
   ) {}
 
-  // listForOwner — page-driven query. listAll is the admin variant.
+  // Forgejo is the source of truth — we don't mirror metadata in our
+  // DB. Only ownership lives console-side (FGA tuples). Listing =
+  // FGA listObjects → fetch each repo's metadata from Forgejo.
+  // Metadata fetches run in parallel; missing repos (Forgejo 404)
+  // are skipped with a warning so a stale FGA tuple doesn't break
+  // the whole list.
+
   async listAll(): Promise<Repo[]> {
-    const { rows } = await authPool.query<Row>(
-      `SELECT ${ROW_COLUMNS} FROM "repo" ORDER BY created_at DESC`,
-    )
-    return rows.map((r) => this.toRepo(r))
+    if (!this.forgejo.enabled) return []
+    const items = await this.forgejo.listOrgRepos({
+      org: this.forgejo.functionOrg,
+    })
+    // Function repos share the org but are managed under
+    // /services/functions; filter them out so /repos stays focused
+    // on standalone repos. The "function-" prefix is the slug
+    // contract enforced in functions.service.ts.
+    return items
+      .filter((m) => !m.name.startsWith("function-"))
+      .map((m) => this.toRepo(m))
   }
 
   async listForOwner(ownerId: string): Promise<Repo[]> {
     const slugs = await this.fga.listAccessibleRepos(ownerId)
     if (slugs.length === 0) return []
-    const { rows } = await authPool.query<Row>(
-      `SELECT ${ROW_COLUMNS}
-         FROM "repo"
-        WHERE slug = ANY($1::text[])
-        ORDER BY created_at DESC`,
-      [slugs],
+    if (!this.forgejo.enabled) return []
+    const results = await Promise.all(
+      slugs.map((slug) =>
+        this.forgejo
+          .getRepo({ org: this.forgejo.functionOrg, repo: slug })
+          .catch((err) => {
+            this.log.warn(`getRepo ${slug}: ${(err as Error).message}`)
+            return null
+          }),
+      ),
     )
-    return rows.map((r) => this.toRepo(r))
+    return results
+      .filter((m): m is RepoMetadata => m !== null)
+      .map((m) => this.toRepo(m))
   }
 
   async get(ownerId: string, slug: string): Promise<Repo> {
     if (!(await this.fga.canAccessRepo(ownerId, slug))) {
       throw new NotFoundException(`repo ${slug} not found`)
     }
-    const { rows } = await authPool.query<Row>(
-      `SELECT ${ROW_COLUMNS} FROM "repo" WHERE slug = $1`,
-      [slug],
-    )
-    const row = rows[0]
-    if (!row) throw new NotFoundException(`repo ${slug} not found`)
-    return this.toRepo(row)
+    if (!this.forgejo.enabled) {
+      throw new NotFoundException("Forgejo is not configured")
+    }
+    const m = await this.forgejo.getRepo({
+      org: this.forgejo.functionOrg,
+      repo: slug,
+    })
+    if (!m) throw new NotFoundException(`repo ${slug} not found`)
+    return this.toRepo(m)
   }
 
-  private toRepo(row: Row): Repo {
-    const slug = row.slug
-    const cloneUrl = this.forgejo.repoCloneUrl(slug)
+  // Maps Forgejo's response into our Repo type. Source is derived
+  // from original_url — non-empty means the repo was created via
+  // generate/migrate from somewhere else (currently only GitHub
+  // import wires that up).
+  private toRepo(m: RepoMetadata): Repo {
+    const source: RepoSource = m.originalUrl ? "github-import" : "forgejo"
     return {
-      id: slug,
-      slug,
-      name: row.name,
-      owner: row.owner_id,
-      source: row.source as RepoSource,
-      forgejoUrl: this.forgejo.repoWebUrl(slug),
-      cloneUrl,
-      createdAt: row.created_at.toISOString(),
+      id: m.name,
+      slug: m.name,
+      name: m.name,
+      // owner is opaque to the page (it's the platform user id, not
+      // a Forgejo identity). Filled in from FGA at controller scope
+      // when needed; for the list we leave it as the requesting
+      // user since we already gated on can_access.
+      owner: "",
+      source,
+      forgejoUrl: m.htmlUrl || this.forgejo.repoWebUrl(m.name),
+      cloneUrl: m.cloneUrl || this.forgejo.repoCloneUrl(m.name),
+      createdAt: m.createdAt,
     }
   }
 }
 
-// Best-effort sanitiser shared with create+import. Forgejo accepts a
-// fairly permissive name set but we lock it down to the slug shape we
-// already use elsewhere (lowercase letters/digits/hyphens) for DNS-
-// safety in case repos start backing per-repo Knative/HTTP surfaces
-// later.
+// Best-effort sanitiser shared with create+import (lands in follow-up
+// commits). Forgejo accepts a fairly permissive name set but we lock
+// it down to the slug shape we already use elsewhere.
 export function sanitizeRepoName(input: string): string {
   return input
     .toLowerCase()

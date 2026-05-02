@@ -216,6 +216,56 @@ export class ForgejoClient {
       }))
   }
 
+  // Single repo metadata. 404 → null. Used by /repos to hydrate a
+  // slug returned by FGA into the user-facing fields (description,
+  // created_at, original_url, etc.) without a DB cache layer.
+  async getRepo(input: {
+    org: string
+    repo: string
+  }): Promise<RepoMetadata | null> {
+    const r = await this.request(
+      "GET",
+      `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}`,
+    )
+    if (r.status === 404) return null
+    if (r.status !== 200) {
+      throw new Error(
+        `Forgejo getRepo(${input.org}/${input.repo}) -> ${r.status}: ${r.text}`,
+      )
+    }
+    return parseRepoMetadata(JSON.parse(r.text))
+  }
+
+  // Bulk-list every repo under an org. Pagination ceiling: Phase-2
+  // is single-digit users with maybe a dozen repos each; we read up
+  // to `limit` per page and stop after the first underfull page.
+  async listOrgRepos(input: {
+    org: string
+    limit?: number
+  }): Promise<RepoMetadata[]> {
+    const limit = input.limit ?? 50
+    const out: RepoMetadata[] = []
+    let page = 1
+    while (true) {
+      const r = await this.request(
+        "GET",
+        `/api/v1/orgs/${encodeURIComponent(input.org)}/repos?limit=${limit}&page=${page}`,
+      )
+      if (r.status === 404) return out
+      if (r.status !== 200) {
+        throw new Error(
+          `Forgejo listOrgRepos(${input.org}) -> ${r.status}: ${r.text}`,
+        )
+      }
+      const body = JSON.parse(r.text)
+      if (!Array.isArray(body)) return out
+      for (const item of body) out.push(parseRepoMetadata(item))
+      if (body.length < limit) return out
+      page++
+      if (page > 20) return out // hard cap, never expected to hit
+    }
+  }
+
   // Forgejo's "generate from template" — server-side fork that copies
   // the template repo into a new repo under `target_owner` in a single
   // commit. Caller must have set `template: true` on the source.
@@ -454,5 +504,43 @@ export class ForgejoClient {
     })
     const text = await res.text().catch(() => "")
     return { status: res.status, text }
+  }
+}
+
+// The slice of Forgejo's repo response we surface to callers. Picked
+// to cover the /repos page without needing extra round-trips.
+export type RepoMetadata = {
+  // Forgejo's repo name (the URL slug under the org). Stable id.
+  name: string
+  // Repo description (free-text). Empty string if unset.
+  description: string
+  // True when imported from a remote — `original_url` is the source.
+  // Used to label the repo as "github-import" vs "forgejo".
+  originalUrl: string
+  cloneUrl: string
+  htmlUrl: string
+  // ISO-8601 timestamps from Forgejo.
+  createdAt: string
+  updatedAt: string
+}
+
+function parseRepoMetadata(raw: unknown): RepoMetadata {
+  const r = raw as {
+    name?: string
+    description?: string
+    original_url?: string
+    clone_url?: string
+    html_url?: string
+    created_at?: string
+    updated_at?: string
+  }
+  return {
+    name: r.name ?? "",
+    description: r.description ?? "",
+    originalUrl: r.original_url ?? "",
+    cloneUrl: r.clone_url ?? "",
+    htmlUrl: r.html_url ?? "",
+    createdAt: r.created_at ?? "",
+    updatedAt: r.updated_at ?? "",
   }
 }

@@ -39,19 +39,6 @@ async function ensureSchema(): Promise<void> {
     -- ALTER TABLE … IF NOT EXISTS (Postgres 9.6+) so it's safe to run
     -- on every boot.
     ALTER TABLE "function" ADD COLUMN IF NOT EXISTS exposed boolean NOT NULL DEFAULT false;
-
-    -- Standalone Forgejo repos managed via /repos. Function repos
-    -- live in their own table because they carry runtime metadata;
-    -- this table is for "just a git repo" entries the user creates
-    -- or imports for general-purpose work.
-    CREATE TABLE IF NOT EXISTS "repo" (
-      slug text PRIMARY KEY,
-      owner_id text NOT NULL,
-      name text NOT NULL,
-      source text NOT NULL DEFAULT 'forgejo',
-      created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS repo_owner_idx ON "repo"(owner_id);
   `)
 
   // System user — the platform's own identity. Seeded with the
