@@ -680,8 +680,13 @@ export class AgentsService {
           spec: {
             clusterIP: "None",
             selector: { "agent-platform/agent-slug": name },
+            // The "agent" entry preserves the historical port (8000)
+            // so existing HTTPRoute references and bound-VM callers
+            // keep working. The "http" entry maps :80 → 8000 so the
+            // bare cluster-local hostname works without a port.
             ports: [
-              { name: "http", port: AGENT_PORT, targetPort: AGENT_PORT },
+              { name: "agent", port: AGENT_PORT, targetPort: AGENT_PORT },
+              { name: "http", port: 80, targetPort: AGENT_PORT },
             ],
           },
         },

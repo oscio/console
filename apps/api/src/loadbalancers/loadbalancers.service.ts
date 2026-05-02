@@ -153,8 +153,13 @@ export class LoadBalancersService {
           },
           spec: {
             selector: { "agent-platform/vm-slug": vmSlug },
+            // The "lb" entry preserves the original VM port so the
+            // HTTPRoute (which targets that port) keeps working.
+            // The "http" entry maps :80 → VM port so in-cluster
+            // callers can hit the bare cluster-local hostname.
             ports: [
               { name: "lb", port: input.port, targetPort: input.port },
+              { name: "http", port: 80, targetPort: input.port },
             ],
           },
         },

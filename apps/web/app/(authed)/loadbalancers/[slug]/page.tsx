@@ -77,7 +77,7 @@ export default async function LoadBalancerDetailPage({
         <div className="space-y-2">
           <div className="space-y-0.5">
             <div className="text-muted-foreground text-xs">
-              Internal (cluster-local — append :{lb.port})
+              Internal (cluster-local)
             </div>
             <span
               className={`font-mono text-sm ${

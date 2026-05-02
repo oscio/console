@@ -95,8 +95,7 @@ export default async function AgentDetailPage({
         <h2 className="text-lg font-semibold">URLs</h2>
         <div className="space-y-0.5">
           <div className="text-muted-foreground text-xs">
-            Internal (cluster-local — append :8000 for the FastAPI
-            wrapper)
+            Internal (cluster-local)
           </div>
           <span
             className={`font-mono text-sm ${
