@@ -10,7 +10,8 @@ import { Injectable, Logger } from "@nestjs/common"
 //   FORGEJO_PUBLIC_URL      user-facing base, e.g. https://git.<domain>
 //   FORGEJO_ADMIN_USER      basic-auth username
 //   FORGEJO_ADMIN_PASSWORD  basic-auth password
-//   FORGEJO_FUNCTION_ORG    org under which function repos live (default `service`)
+//   FORGEJO_FUNCTION_ORG    org user-generated function repos live in (default `service`)
+//   FORGEJO_TEMPLATE_ORG    org the template repos are forked into by tf (default `platform`)
 //
 // When FORGEJO_INTERNAL_URL is empty the client is `disabled` and
 // FunctionsService falls back to DB-only behaviour. That's the
@@ -29,6 +30,11 @@ export class ForgejoClient {
   private readonly user = process.env.FORGEJO_ADMIN_USER ?? ""
   private readonly password = process.env.FORGEJO_ADMIN_PASSWORD ?? ""
   readonly functionOrg = process.env.FORGEJO_FUNCTION_ORG || "service"
+  // Org tf forks the platform-managed template repos into. Templates
+  // are NOT under functionOrg because user functions and platform
+  // templates have separate lifecycles (templates managed via tf
+  // forks; functions managed by users via console).
+  readonly templateOrg = process.env.FORGEJO_TEMPLATE_ORG || "platform"
 
   get enabled(): boolean {
     return !!this.internalUrl && !!this.user && !!this.password

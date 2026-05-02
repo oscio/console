@@ -25,19 +25,19 @@ async function ensureFunctionOrgSecrets(forgejo: ForgejoClient): Promise<void> {
   )
 }
 
-// Ensure the org + per-runtime template repos exist and are flagged
-// as Forgejo templates (so generate-from-template works). The repo
-// content itself is authored separately — push commits to
-// `service/<repoName>` from the on-disk checkout
-// (services/<repoName>/) using your usual git workflow. Console-api
-// never writes file content into these repos: git is the SoT.
+// Template repos are forked from oscio into <templateOrg>/<repoName>
+// by terraform's forgejo-fork module — that's the SoT for both code
+// and existence. Console-api boot only needs to:
+//   1. Ensure the function org (where user-created function repos
+//      land) exists and has the Harbor secrets the build workflow
+//      expects.
+//   2. Flip the `template:true` flag on the forked repo so
+//      generate-from-template works against it.
 //
-// On a brand-new cluster the repo will be empty until someone pushes
-// the initial template commit. FunctionsService.create surfaces the
-// resulting Forgejo error if generate-from-template hits an empty
-// repo.
-//
-// Skipped silently when the Forgejo client is disabled.
+// If a tf apply hasn't run yet the template repo won't exist —
+// markRepoAsTemplate will fail and we surface that in the log; the
+// rest of console-api still boots so users can drive non-Functions
+// flows.
 export async function ensureFunctionTemplates(
   forgejo: ForgejoClient,
 ): Promise<void> {
@@ -51,35 +51,21 @@ export async function ensureFunctionTemplates(
   )
   for (const tpl of listTemplates()) {
     try {
-      await ensureOne(forgejo, tpl)
+      await markTemplate(forgejo, tpl)
     } catch (err) {
       log.error(
-        `Failed to bootstrap template ${tpl.repoName}: ${(err as Error).message}`,
+        `Failed to flag template ${forgejo.templateOrg}/${tpl.repoName}: ${(err as Error).message}`,
       )
     }
   }
 }
 
-async function ensureOne(
+async function markTemplate(
   forgejo: ForgejoClient,
   tpl: FunctionTemplate,
 ): Promise<void> {
-  // Create empty repo if missing. autoInit:false because a real
-  // template push from the on-disk checkout will land the initial
-  // commit; auto-init would just add a stray README.
-  try {
-    await forgejo.createOrgRepo({
-      org: forgejo.functionOrg,
-      name: tpl.repoName,
-      description: tpl.description,
-      autoInit: false,
-      private: false,
-    })
-    log.log(`Created template repo ${forgejo.functionOrg}/${tpl.repoName}`)
-  } catch (err) {
-    const msg = (err as Error).message
-    if (!/422|409|already.*exists/i.test(msg)) throw err
-  }
-  // Mark template — idempotent.
-  await forgejo.markRepoAsTemplate(forgejo.functionOrg, tpl.repoName)
+  await forgejo.markRepoAsTemplate(forgejo.templateOrg, tpl.repoName)
+  log.log(
+    `Marked ${forgejo.templateOrg}/${tpl.repoName} as a Forgejo template`,
+  )
 }

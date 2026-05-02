@@ -116,7 +116,9 @@ export class FunctionsService {
     if (this.forgejo.enabled) {
       const tpl = getTemplate(input.runtime)
       await this.forgejo.generateFromTemplate({
-        templateOwner: this.forgejo.functionOrg,
+        // Templates live under templateOrg (managed by tf forgejo-fork
+        // module). User function repos land under functionOrg.
+        templateOwner: this.forgejo.templateOrg,
         templateRepo: tpl.repoName,
         targetOwner: this.forgejo.functionOrg,
         targetName: slug,
