@@ -107,6 +107,18 @@ export class VmsService {
     process.env.VM_GATEWAY_NAME ?? "platform-gateway"
   private readonly gatewayNamespace =
     process.env.VM_GATEWAY_NAMESPACE ?? "platform-traefik"
+  // Forgejo creds forwarded into the workspace pod so `git clone` /
+  // `git push` against `git.<domain>` Just Work without the user
+  // pasting a PAT. Phase-2: shared admin token (no per-user identity
+  // in Forgejo yet). start.sh on the VM image picks these up via
+  // GIT_HOST / GIT_USERNAME / GIT_TOKEN and configures a global
+  // credential.helper for the coder user.
+  private readonly forgejoPublicUrl = (
+    process.env.FORGEJO_PUBLIC_URL ?? ""
+  ).replace(/\/$/, "")
+  private readonly forgejoAdminUser = process.env.FORGEJO_ADMIN_USER ?? ""
+  private readonly forgejoAdminPassword =
+    process.env.FORGEJO_ADMIN_PASSWORD ?? ""
   // ForwardAuth chain: oauth2-proxy /oauth2/auth (session) →
   // console-api /vms/auth (FGA ownership). Traefik resolves
   // Middleware refs only within the HTTPRoute's namespace, so the
@@ -333,6 +345,7 @@ export class VmsService {
           { name: "VM_NAME", value: displayName },
           { name: "VM_AGENT", value: input.agentType },
           { name: "DOCKER_HOST", value: "tcp://127.0.0.1:2375" },
+          ...this.gitCredentialEnv(),
         ],
         volumeMounts: workspaceMounts,
         resources: {
@@ -892,6 +905,28 @@ export class VmsService {
     } catch (err) {
       rethrowK8sError(err, `Failed to create headless Service for VM "${name}"`)
     }
+  }
+
+  // GIT_HOST / GIT_USERNAME / GIT_TOKEN are the env contract the VM
+  // image's start.sh expects. Returns [] when Forgejo isn't wired,
+  // so start.sh's `if` falls through and the VM boots without git
+  // credentials (user can still set them up manually inside the VM).
+  private gitCredentialEnv(): Array<{ name: string; value: string }> {
+    if (
+      !this.forgejoPublicUrl ||
+      !this.forgejoAdminUser ||
+      !this.forgejoAdminPassword
+    ) {
+      return []
+    }
+    // Strip the scheme so the credentials line ends up as
+    // https://<user>:<token>@<host> — start.sh adds the scheme.
+    const host = this.forgejoPublicUrl.replace(/^https?:\/\//, "")
+    return [
+      { name: "GIT_HOST", value: host },
+      { name: "GIT_USERNAME", value: this.forgejoAdminUser },
+      { name: "GIT_TOKEN", value: this.forgejoAdminPassword },
+    ]
   }
 
   private vmLabels(
