@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import { DeleteConfirmButton } from "@/components/delete-confirm-button"
 import { type AgentModel, DEFAULT_AGENT_MODEL } from "@/lib/agent-models"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
@@ -199,28 +200,19 @@ export function DeleteAgentButton({
   label: string
   disabled?: boolean
 }) {
-  const [pending, startTransition] = useTransition()
   return (
-    <form
-      action={(fd) => {
-        if (
-          !confirm(`Delete agent "${label}" (${slug})? This is irreversible.`)
-        )
-          return
-        startTransition(() => action(fd))
-      }}
-    >
-      <input type="hidden" name="slug" value={slug} />
-      <Button
-        type="submit"
-        variant="outline"
-        size="sm"
-        disabled={pending || disabled}
-        className="text-destructive hover:text-destructive"
-        title={disabled ? "Agent is attached to a VM. Delete the VM first." : undefined}
-      >
-        {pending ? "Deleting…" : "Delete"}
-      </Button>
-    </form>
+    <DeleteConfirmButton
+      action={action}
+      hiddenFields={{ slug }}
+      disabled={disabled}
+      disabledReason="Agent is attached to a VM. Delete the VM first."
+      title="Delete agent?"
+      description={
+        <>
+          Delete agent <span className="font-mono">{label}</span> (
+          <span className="font-mono">{slug}</span>)? This is irreversible.
+        </>
+      }
+    />
   )
 }

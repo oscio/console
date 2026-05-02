@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import { DeleteConfirmButton } from "@/components/delete-confirm-button"
 import { FUNCTION_RUNTIMES, type FunctionRuntime } from "@/lib/api"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
@@ -156,27 +157,17 @@ export function DeleteFunctionButton({
   slug: string
   label: string
 }) {
-  const [pending, startTransition] = useTransition()
   return (
-    <form
-      action={(fd) => {
-        if (
-          !confirm(`Delete function "${label}" (${slug})? This is irreversible.`)
-        )
-          return
-        startTransition(() => action(fd))
-      }}
-    >
-      <input type="hidden" name="slug" value={slug} />
-      <Button
-        type="submit"
-        variant="outline"
-        size="sm"
-        disabled={pending}
-        className="text-destructive hover:text-destructive"
-      >
-        {pending ? "Deleting…" : "Delete"}
-      </Button>
-    </form>
+    <DeleteConfirmButton
+      action={action}
+      hiddenFields={{ slug }}
+      title="Delete function?"
+      description={
+        <>
+          Delete function <span className="font-mono">{label}</span> (
+          <span className="font-mono">{slug}</span>)? This is irreversible.
+        </>
+      }
+    />
   )
 }

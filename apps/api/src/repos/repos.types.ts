@@ -7,11 +7,22 @@
 
 export type RepoSource = "forgejo" | "github-import"
 
+// Where a repo lives in the Forgejo org tree:
+//   "mine"     — user-created standalone repo under functionOrg, FGA
+//                tuple grants ownership; deletable from console.
+//   "platform" — tf-forked repo under templateOrg (function template,
+//                infra, agents, etc.). Read-only from console. Listed
+//                so users can see clone URLs for in-VM checkouts.
+export type RepoKind = "mine" | "platform"
+
 export type Repo = {
   id: string
   slug: string
   name: string
-  owner: string
+  // Forgejo org the repo lives in (functionOrg for "mine",
+  // templateOrg for "platform").
+  forgejoOrg: string
+  kind: RepoKind
   // "forgejo" = empty repo created on this platform.
   // "github-import" = one-time copy of a GitHub repo via Forgejo migrate.
   source: RepoSource

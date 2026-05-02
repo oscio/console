@@ -610,12 +610,16 @@ export async function renameLoadBalancer(
 // surfaced under /services/functions).
 
 export type RepoSource = "forgejo" | "github-import"
+// "mine" = user owns it (deletable, FGA-gated). "platform" = tf-managed
+// shared repo (read-only listing).
+export type RepoKind = "mine" | "platform"
 
 export type Repo = {
   id: string
   slug: string
   name: string
-  owner: string
+  forgejoOrg: string
+  kind: RepoKind
   source: RepoSource
   forgejoUrl: string
   cloneUrl: string

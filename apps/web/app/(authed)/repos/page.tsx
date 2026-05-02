@@ -63,6 +63,8 @@ export default async function ReposPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Org</TableHead>
+                <TableHead>Kind</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Clone URL</TableHead>
                 <TableHead>Created</TableHead>
@@ -86,6 +88,16 @@ export default async function ReposPage() {
                       repo.name
                     )}
                   </TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-xs">
+                    {repo.forgejoOrg}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={repo.kind === "mine" ? "default" : "outline"}
+                    >
+                      {repo.kind === "mine" ? "Mine" : "Platform"}
+                    </Badge>
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{repo.source}</Badge>
                   </TableCell>
@@ -96,17 +108,21 @@ export default async function ReposPage() {
                     <LocalTime iso={repo.createdAt} />
                   </TableCell>
                   <TableCell className="text-right">
-                    <DeleteRepoButton
-                      action={deleteRepoAction}
-                      slug={repo.slug}
-                    />
+                    {repo.kind === "mine" ? (
+                      <DeleteRepoButton
+                        action={deleteRepoAction}
+                        slug={repo.slug}
+                      />
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
               {repos.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={7}
                     className="text-muted-foreground py-6 text-center"
                   >
                     No repos yet.

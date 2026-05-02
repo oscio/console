@@ -15,6 +15,7 @@ import {
 } from "@workspace/ui/components/dialog"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
+import { DeleteConfirmButton } from "@/components/delete-confirm-button"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -107,27 +108,17 @@ export function DeleteRepoButton({
   action: (formData: FormData) => Promise<void>
   slug: string
 }) {
-  const [pending, startTransition] = useTransition()
   return (
-    <form
-      action={(fd) => {
-        if (
-          !confirm(`Delete repo "${slug}"? Forgejo content goes too. Irreversible.`)
-        )
-          return
-        startTransition(() => action(fd))
-      }}
-    >
-      <input type="hidden" name="slug" value={slug} />
-      <Button
-        type="submit"
-        variant="outline"
-        size="sm"
-        disabled={pending}
-        className="text-destructive hover:text-destructive"
-      >
-        {pending ? "Deleting…" : "Delete"}
-      </Button>
-    </form>
+    <DeleteConfirmButton
+      action={action}
+      hiddenFields={{ slug }}
+      title="Delete repo?"
+      description={
+        <>
+          Delete repo <span className="font-mono">{slug}</span>? Forgejo
+          content goes too. Irreversible.
+        </>
+      }
+    />
   )
 }

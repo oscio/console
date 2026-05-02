@@ -16,6 +16,7 @@ import {
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import { Slider } from "@workspace/ui/components/slider"
+import { DeleteConfirmButton } from "@/components/delete-confirm-button"
 
 type Action = (formData: FormData) => Promise<{ error?: string } | void>
 
@@ -143,30 +144,20 @@ export function DeleteVolumeButton({
   label: string
   disabled?: boolean
 }) {
-  const [pending, startTransition] = useTransition()
   return (
-    <form
-      action={(fd) => {
-        if (
-          !confirm(
-            `Delete volume "${label}" (${slug})? Storage is permanently destroyed.`,
-          )
-        )
-          return
-        startTransition(() => action(fd))
-      }}
-    >
-      <input type="hidden" name="slug" value={slug} />
-      <Button
-        type="submit"
-        variant="outline"
-        size="sm"
-        disabled={pending || disabled}
-        className="text-destructive hover:text-destructive"
-        title={disabled ? "Volume is bound to a VM. Delete the VM first." : undefined}
-      >
-        {pending ? "Deleting…" : "Delete"}
-      </Button>
-    </form>
+    <DeleteConfirmButton
+      action={action}
+      hiddenFields={{ slug }}
+      disabled={disabled}
+      disabledReason="Volume is bound to a VM. Delete the VM first."
+      title="Delete volume?"
+      description={
+        <>
+          Delete volume <span className="font-mono">{label}</span> (
+          <span className="font-mono">{slug}</span>)? Storage is
+          permanently destroyed.
+        </>
+      }
+    />
   )
 }
