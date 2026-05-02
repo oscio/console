@@ -21,9 +21,9 @@ export type Agent = {
   status: AgentStatus
   hostname: string
   createdAt: string
-  // Cluster-local URL of the agent's FastAPI wrapper (port 8000).
-  // Always reachable from in-cluster callers — UI / external traffic
-  // goes through the console-api proxy at /agents/<slug>/chat instead.
+  // Cluster-local URL — append :8000 (FastAPI wrapper) to call the
+  // agent directly from in-cluster pods. UI / external traffic goes
+  // through the console-api proxy at /agents/<slug>/chat instead.
   internalUrl: string
   // VM slug this agent rides as a sidecar in, or null for standalone
   // agents. UI uses this to render an "attached to <vm-name>" badge

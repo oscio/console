@@ -750,7 +750,7 @@ export class AgentsService {
       status,
       hostname,
       createdAt,
-      internalUrl: `http://${slug}.${namespace}.svc.cluster.local:8000`,
+      internalUrl: `http://${slug}.${namespace}.svc.cluster.local`,
       boundToVm,
     }
   }
