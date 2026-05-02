@@ -655,6 +655,51 @@ export async function createRepo(
   return (await res.json()) as Repo
 }
 
+export async function forkRepo(
+  cookieHeader: string,
+  input: { sourceOrg: string; sourceName: string; name?: string },
+): Promise<Repo> {
+  const res = await fetch(`${API_URL}/repos/fork`, {
+    method: "POST",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`repos fork failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Repo
+}
+
+export async function importRepo(
+  cookieHeader: string,
+  input: { githubUrl: string; name?: string },
+): Promise<Repo> {
+  const res = await fetch(`${API_URL}/repos/import`, {
+    method: "POST",
+    headers: { cookie: cookieHeader, "content-type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`repos import failed: ${res.status} ${text}`)
+  }
+  return (await res.json()) as Repo
+}
+
+export async function fetchRepoSources(
+  cookieHeader: string,
+): Promise<Repo[]> {
+  const res = await fetch(`${API_URL}/repos/sources`, {
+    headers: { cookie: cookieHeader },
+    cache: "no-store",
+  })
+  if (!res.ok) throw new Error(`repos sources failed: ${res.status}`)
+  return (await res.json()) as Repo[]
+}
+
 export async function deleteRepo(
   cookieHeader: string,
   slug: string,

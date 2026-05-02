@@ -9,9 +9,16 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
-import { createRepo, deleteRepo, fetchRepos } from "@/lib/api"
+import {
+  createRepo,
+  deleteRepo,
+  fetchRepos,
+  fetchRepoSources,
+  forkRepo,
+  importRepo,
+} from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
-import { DeleteRepoButton, NewRepoForm } from "./new-repo-form"
+import { DeleteRepoButton, NewRepoMenu } from "./new-repo-form"
 
 async function createRepoAction(formData: FormData) {
   "use server"
@@ -20,6 +27,37 @@ async function createRepoAction(formData: FormData) {
   if (!name) return { error: "name is required" }
   try {
     await createRepo(cookieHeader, { name })
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+  revalidatePath("/repos")
+}
+
+async function forkRepoAction(formData: FormData) {
+  "use server"
+  const cookieHeader = (await headers()).get("cookie") ?? ""
+  const source = String(formData.get("source") ?? "")
+  const [sourceOrg, sourceName] = source.split("/")
+  if (!sourceOrg || !sourceName) {
+    return { error: "pick a source repo" }
+  }
+  const name = String(formData.get("name") ?? "").trim() || undefined
+  try {
+    await forkRepo(cookieHeader, { sourceOrg, sourceName, name })
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
+  revalidatePath("/repos")
+}
+
+async function importRepoAction(formData: FormData) {
+  "use server"
+  const cookieHeader = (await headers()).get("cookie") ?? ""
+  const githubUrl = String(formData.get("githubUrl") ?? "").trim()
+  if (!githubUrl) return { error: "githubUrl is required" }
+  const name = String(formData.get("name") ?? "").trim() || undefined
+  try {
+    await importRepo(cookieHeader, { githubUrl, name })
   } catch (err) {
     return { error: (err as Error).message }
   }
@@ -37,7 +75,10 @@ async function deleteRepoAction(formData: FormData) {
 
 export default async function ReposPage() {
   const cookieHeader = (await headers()).get("cookie") ?? ""
-  const repos = await fetchRepos(cookieHeader)
+  const [repos, sources] = await Promise.all([
+    fetchRepos(cookieHeader),
+    fetchRepoSources(cookieHeader).catch(() => []),
+  ])
 
   return (
     <div className="space-y-6">
@@ -47,10 +88,17 @@ export default async function ReposPage() {
           <p className="text-muted-foreground text-sm">
             Standalone Forgejo repos. Function-backed repos live under
             Functions; this page is for general-purpose code (project
-            scaffolds, imported GitHub repos, scratch).
+            scaffolds, forked platform repos, imported GitHub repos).
           </p>
         </div>
-        {repos !== null && <NewRepoForm action={createRepoAction} />}
+        {repos !== null && (
+          <NewRepoMenu
+            createAction={createRepoAction}
+            forkAction={forkRepoAction}
+            importAction={importRepoAction}
+            sources={sources}
+          />
+        )}
       </div>
 
       {repos === null ? (

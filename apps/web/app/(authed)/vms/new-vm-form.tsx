@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@workspace/ui/components/select"
 import { Slider } from "@workspace/ui/components/slider"
+import { DeleteConfirmButton } from "@/components/delete-confirm-button"
 import type { Volume } from "@/lib/api"
 import { type AgentModel, DEFAULT_AGENT_MODEL } from "@/lib/agent-models"
 
@@ -594,25 +595,17 @@ export function DeleteVmButton({
   slug: string
   label: string
 }) {
-  const [pending, startTransition] = useTransition()
   return (
-    <form
-      action={(fd) => {
-        if (!confirm(`Delete VM "${label}" (${slug})? This is irreversible.`))
-          return
-        startTransition(() => action(fd))
-      }}
-    >
-      <input type="hidden" name="slug" value={slug} />
-      <Button
-        type="submit"
-        variant="outline"
-        size="sm"
-        disabled={pending}
-        className="text-destructive hover:text-destructive"
-      >
-        {pending ? "Deleting…" : "Delete"}
-      </Button>
-    </form>
+    <DeleteConfirmButton
+      action={action}
+      hiddenFields={{ slug }}
+      title="Delete VM?"
+      description={
+        <>
+          Delete VM <span className="font-mono">{label}</span> (
+          <span className="font-mono">{slug}</span>)? This is irreversible.
+        </>
+      }
+    />
   )
 }

@@ -388,6 +388,47 @@ export class ForgejoClient {
     }
   }
 
+  // One-time clone from any git URL into a new Forgejo repo under
+  // `repoOwner`. Used for both "fork an existing Forgejo repo" (URL
+  // is the internal Forgejo clone URL) and "import a public GitHub
+  // repo" (URL is github.com/...). `mirror: false` so the resulting
+  // repo is editable / pushable; we don't auto-sync from upstream.
+  async migrateRepo(input: {
+    cloneAddr: string
+    repoOwner: string
+    repoName: string
+    description?: string
+    private?: boolean
+  }): Promise<void> {
+    const r = await this.request("POST", "/api/v1/repos/migrate", {
+      clone_addr: input.cloneAddr,
+      repo_owner: input.repoOwner,
+      repo_name: input.repoName,
+      description: input.description ?? "",
+      private: input.private ?? false,
+      mirror: false,
+      wiki: false,
+      milestones: false,
+      labels: false,
+      issues: false,
+      pull_requests: false,
+      releases: false,
+    })
+    if (r.status !== 201) {
+      throw new Error(
+        `Forgejo migrateRepo(${input.cloneAddr} → ${input.repoOwner}/${input.repoName}) -> ${r.status}: ${r.text}`,
+      )
+    }
+  }
+
+  // Internal clone URL — what Forgejo migrates from when forking a
+  // repo that's already in Forgejo (no auth needed since both ends
+  // are inside the cluster).
+  internalCloneUrl(org: string, repo: string): string {
+    if (!this.internalUrl) return ""
+    return `${this.internalUrl}/${encodeURIComponent(org)}/${encodeURIComponent(repo)}.git`
+  }
+
   // Manually trigger a workflow that supports `on: workflow_dispatch`.
   // Used after `generateFromTemplate` because Forgejo doesn't fire the
   // push event for the template-generated initial commit, so the very

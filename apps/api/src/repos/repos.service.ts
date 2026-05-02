@@ -7,7 +7,14 @@ import {
 } from "@nestjs/common"
 import { ForgejoClient, RepoMetadata } from "../forgejo/forgejo.client"
 import { OpenFgaService } from "../openfga/openfga.service"
-import { CreateRepoInput, Repo, RepoKind, RepoSource } from "./repos.types"
+import {
+  CreateRepoInput,
+  ForkRepoInput,
+  ImportRepoInput,
+  Repo,
+  RepoKind,
+  RepoSource,
+} from "./repos.types"
 
 @Injectable()
 export class ReposService {
@@ -42,42 +49,40 @@ export class ReposService {
     ]
   }
 
-  // Lists repos the caller cares about: their own (functionOrg + FGA
-  // tuple) plus the platform-shared catalog (templateOrg). Function
-  // repos and orgs the user has no business in are filtered out.
+  // Mine = repos the user has an FGA owner tuple on (created via
+  // /repos POST or fork/import endpoints). Admins go through
+  // listAll() instead and see platform repos and other users' too.
   async listForOwner(ownerId: string): Promise<Repo[]> {
     if (!this.forgejo.enabled) return []
-
-    const mineSlugs = await this.fga.listAccessibleRepos(ownerId)
-    const [mine, platform] = await Promise.all([
-      Promise.all(
-        mineSlugs.map((slug) =>
-          this.forgejo
-            .getRepo({ org: this.forgejo.functionOrg, repo: slug })
-            .catch((err) => {
-              this.log.warn(`getRepo ${slug}: ${(err as Error).message}`)
-              return null
-            }),
-        ),
+    const slugs = await this.fga.listAccessibleRepos(ownerId)
+    if (slugs.length === 0) return []
+    const results = await Promise.all(
+      slugs.map((slug) =>
+        this.forgejo
+          .getRepo({ org: this.forgejo.functionOrg, repo: slug })
+          .catch((err) => {
+            this.log.warn(`getRepo ${slug}: ${(err as Error).message}`)
+            return null
+          }),
       ),
-      this.forgejo
-        .listOrgRepos({ org: this.forgejo.templateOrg })
-        .catch((err) => {
-          this.log.warn(
-            `listOrgRepos ${this.forgejo.templateOrg}: ${(err as Error).message}`,
-          )
-          return []
-        }),
-    ])
+    )
+    return results
+      .filter((m): m is RepoMetadata => m !== null)
+      .map((m) => this.toRepo(m, this.forgejo.functionOrg, "mine"))
+  }
 
-    const out: Repo[] = []
-    for (const m of mine) {
-      if (m) out.push(this.toRepo(m, this.forgejo.functionOrg, "mine"))
-    }
-    for (const m of platform) {
-      out.push(this.toRepo(m, this.forgejo.templateOrg, "platform"))
-    }
-    return out
+  // Fork-source candidates — what users can pick from in the Fork
+  // dialog. Phase-2: every platform-shared (templateOrg) repo. Visible
+  // to all signed-in users regardless of FGA role since cloning a
+  // public template repo is harmless.
+  async listForkSources(): Promise<Repo[]> {
+    if (!this.forgejo.enabled) return []
+    const items = await this.forgejo.listOrgRepos({
+      org: this.forgejo.templateOrg,
+    })
+    return items.map((m) =>
+      this.toRepo(m, this.forgejo.templateOrg, "platform"),
+    )
   }
 
   async get(ownerId: string, slug: string): Promise<Repo> {
@@ -149,6 +154,119 @@ export class ReposService {
       throw err
     }
     return this.get(ownerId, name)
+  }
+
+  // Fork an existing Forgejo repo into the user's namespace. Uses
+  // Forgejo's migrate API with the internal clone URL so we don't
+  // depend on Forgejo's user-namespaced /forks API (which would land
+  // under the admin user, not where we want it). One-time copy
+  // (mirror=false) — no upstream auto-sync.
+  async fork(ownerId: string, input: ForkRepoInput): Promise<Repo> {
+    if (!this.forgejo.enabled) {
+      throw new BadRequestException("Forgejo is not configured")
+    }
+    const targetName = sanitizeRepoName(input.name || input.sourceName)
+    if (!targetName) {
+      throw new BadRequestException("name is required")
+    }
+    if (targetName.startsWith("function-")) {
+      throw new BadRequestException(
+        "name conflicts with the reserved function- prefix",
+      )
+    }
+    const cloneAddr = this.forgejo.internalCloneUrl(
+      input.sourceOrg,
+      input.sourceName,
+    )
+    if (!cloneAddr) {
+      throw new BadRequestException("Forgejo internal URL not configured")
+    }
+    return this.materializeFromMigrate({
+      ownerId,
+      targetName,
+      cloneAddr,
+      description: `Forked from ${input.sourceOrg}/${input.sourceName}`,
+    })
+  }
+
+  // Import a public GitHub repo via Forgejo's migrate. After this the
+  // GitHub side is irrelevant — the repo is a normal Forgejo repo
+  // owned by the caller. PATs / private repos intentionally not
+  // supported in Phase-2.
+  async import(ownerId: string, input: ImportRepoInput): Promise<Repo> {
+    if (!this.forgejo.enabled) {
+      throw new BadRequestException("Forgejo is not configured")
+    }
+    const url = (input.githubUrl ?? "").trim()
+    if (!/^https?:\/\/github\.com\/[^/]+\/[^/]+/.test(url)) {
+      throw new BadRequestException(
+        "githubUrl must look like https://github.com/<owner>/<repo>",
+      )
+    }
+    // Strip optional trailing .git and pull the last path segment
+    // for the default name.
+    const lastSegment =
+      url
+        .replace(/\.git$/, "")
+        .split("/")
+        .filter(Boolean)
+        .pop() ?? ""
+    const targetName = sanitizeRepoName(input.name || lastSegment)
+    if (!targetName) {
+      throw new BadRequestException("name is required")
+    }
+    if (targetName.startsWith("function-")) {
+      throw new BadRequestException(
+        "name conflicts with the reserved function- prefix",
+      )
+    }
+    return this.materializeFromMigrate({
+      ownerId,
+      targetName,
+      cloneAddr: url,
+      description: `Imported from ${url}`,
+    })
+  }
+
+  // Shared back-end for fork() and import(). Calls migrate, then
+  // grants FGA owner. On grant failure, deletes the freshly migrated
+  // repo so we don't leak orphaned Forgejo content.
+  private async materializeFromMigrate(input: {
+    ownerId: string
+    targetName: string
+    cloneAddr: string
+    description: string
+  }): Promise<Repo> {
+    try {
+      await this.forgejo.migrateRepo({
+        cloneAddr: input.cloneAddr,
+        repoOwner: this.forgejo.functionOrg,
+        repoName: input.targetName,
+        description: input.description,
+        private: false,
+      })
+    } catch (err) {
+      const msg = (err as Error).message
+      if (/422|409|already.*exists/i.test(msg)) {
+        throw new ConflictException(
+          `repo "${input.targetName}" already exists — pick a different name`,
+        )
+      }
+      throw err
+    }
+    try {
+      await this.fga.grantRepoOwner(input.targetName, input.ownerId)
+    } catch (err) {
+      await this.forgejo
+        .deleteRepo(this.forgejo.functionOrg, input.targetName)
+        .catch((cleanupErr) =>
+          this.log.warn(
+            `cleanup failed for ${input.targetName}: ${(cleanupErr as Error).message}`,
+          ),
+        )
+      throw err
+    }
+    return this.get(input.ownerId, input.targetName)
   }
 
   async delete(ownerId: string, slug: string): Promise<void> {

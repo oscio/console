@@ -25,6 +25,7 @@ import {
 
 const RESERVED: { key: string }[] = [
   { key: "OPENROUTER_API_KEY" },
+  { key: "OPENAI_API_KEY" },
   { key: "RESEND_API_KEY" },
 ]
 

@@ -39,14 +39,22 @@ export type CreateRepoInput = {
   name: string
 }
 
+export type ForkRepoInput = {
+  // Source repo on Forgejo (any org the platform makes available
+  // through /repos/sources). The fork lands as a fresh, editable copy
+  // under the function org owned by the caller.
+  sourceOrg: string
+  sourceName: string
+  // Optional rename for the fork; defaults to sourceName. Sanitised
+  // to a slug before use.
+  name?: string
+}
+
 export type ImportRepoInput = {
-  // Public or private GitHub URL. Private requires githubToken.
+  // Public GitHub URL — Phase-2 doesn't accept PATs, so private repos
+  // can't be imported through this flow.
   githubUrl: string
   // Optional name override; defaults to the GitHub repo's last path
-  // segment. Always sanitised to a slug before being used as the
-  // Forgejo repo name.
+  // segment. Sanitised to a slug.
   name?: string
-  // PAT with repo:read scope, used for the migrate API call only.
-  // Never persisted.
-  githubToken?: string
 }
