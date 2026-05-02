@@ -112,7 +112,7 @@ export default async function VmDetailPage({
         <div className="space-y-0.5">
           <div className="text-muted-foreground text-xs">
             Internal (cluster-local — pick a port: :8080 code-server,
-            :7681 xterm, :8787 webui
+            :7681 xterm
             {vm.imageType === "desktop" ? ", :6901 vnc" : ""})
           </div>
           <span className="font-mono text-sm">{vm.internalUrl}</span>

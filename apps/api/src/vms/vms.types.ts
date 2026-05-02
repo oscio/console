@@ -23,9 +23,9 @@ export type Vm = {
   status: VmStatus
   hostname: string
   // Cluster-local URL for in-cluster callers. Headless Service named
-  // <slug> exposes ports 8080 (http), 7681 (xterm), 8787 (webui), and
-  // 6901 (vnc, desktop only) — pick the port for the surface you want.
-  // No :80 mapping: a VM has no canonical "main" surface to default to.
+  // <slug> exposes ports 8080 (code-server), 7681 (xterm), and 6901
+  // (vnc, desktop only) — pick the port for the surface you want. No
+  // :80 mapping: a VM has no canonical "main" surface to default to.
   internalUrl: string
   // Allocated resource requests from the workspace container's pod
   // spec. Populated by toVm(); shown in the detail card so users

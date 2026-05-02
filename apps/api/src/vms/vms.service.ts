@@ -322,7 +322,6 @@ export class VmsService {
         ports: [
           { name: "http", containerPort: 8080 },
           { name: "xterm", containerPort: 7681 },
-          { name: "webui", containerPort: 8787 },
           ...(input.imageType === "desktop"
             ? [{ name: "vnc", containerPort: 6901 }]
             : []),
@@ -872,7 +871,6 @@ export class VmsService {
     const ports = [
       { name: "http", port: 8080, targetPort: 8080 },
       { name: "xterm", port: 7681, targetPort: 7681 },
-      { name: "webui", port: 8787, targetPort: 8787 },
       ...(imageType === "desktop"
         ? [{ name: "vnc", port: 6901, targetPort: 6901 }]
         : []),

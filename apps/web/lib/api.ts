@@ -101,7 +101,7 @@ export type Vm = {
   status: VmStatus
   hostname: string
   // Cluster-local URL of the workspace headless Service (multi-port:
-  // 8080 http / 7681 xterm / 8787 webui / 6901 vnc on desktop).
+  // 8080 code-server / 7681 xterm / 6901 vnc on desktop).
   internalUrl: string
   // Resource requests on the workspace container, K8s-native form
   // (e.g. "2", "4Gi"). Surfaced for the VM detail card.
