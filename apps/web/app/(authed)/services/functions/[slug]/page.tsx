@@ -132,7 +132,7 @@ export default async function FunctionDetailPage({
         <div className="space-y-2">
           <div className="space-y-0.5">
             <div className="text-muted-foreground text-xs">
-              Internal{deployed ? " (cluster-local)" : ""}
+              Internal (cluster-local)
             </div>
             <span
               className={`font-mono text-sm ${
