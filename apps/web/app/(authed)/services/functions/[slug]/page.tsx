@@ -14,8 +14,6 @@ import {
   fetchFunctionRuntime,
   fetchFunctions,
   isDeployed,
-  lifecycleBadge,
-  lifecycleFor,
   renameFunction,
   setFunctionExposed,
   type Func,
@@ -52,12 +50,11 @@ export default async function FunctionDetailPage({
   const runtime = await fetchFunctionRuntime(cookieHeader, slug).catch(
     () => null,
   )
-  const lifecycle = runtime ? lifecycleFor(runtime) : "unknown"
-  const lifecycleBadgeProps = lifecycleBadge(lifecycle)
   // Pre-deploy the function has no prod Revision, so the URL doesn't
   // resolve and the Internal/Public-URL toggle is meaningless. Drive
   // most of the bottom sections off this so the UI is honest about
-  // what's actually reachable.
+  // what's actually reachable. We only surface Draft vs Deployed —
+  // build/lifecycle detail lives on the editor page.
   const deployed = runtime ? isDeployed(runtime) : false
 
   async function renameAction(formData: FormData) {
@@ -160,9 +157,11 @@ export default async function FunctionDetailPage({
             <Details
               fn={fn}
               statusBadge={
-                <Badge variant={lifecycleBadgeProps.variant}>
-                  {lifecycleBadgeProps.label}
-                </Badge>
+                deployed ? (
+                  <Badge variant="default">Deployed</Badge>
+                ) : (
+                  <Badge variant="outline">Draft</Badge>
+                )
               }
               exposeToggle={
                 <ExposeToggle

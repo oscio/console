@@ -12,15 +12,12 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import {
-  type FunctionLifecycle,
   type FunctionRuntime,
   createFunction,
   deleteFunction,
   fetchFunctionRuntime,
   fetchFunctions,
   isDeployed,
-  lifecycleBadge,
-  lifecycleFor,
 } from "@/lib/api"
 import { LocalTime } from "@/components/local-time"
 import { DeleteFunctionButton, NewFunctionForm } from "./new-function-form"
@@ -55,34 +52,16 @@ export default async function FunctionsPage() {
   // build/deploy state, not a hardcoded "Draft". Each call hits Forgejo
   // + Knative, so they run in parallel; an individual failure resolves
   // to "unknown" rather than failing the whole page.
-  const states: Record<
-    string,
-    { lifecycle: FunctionLifecycle; deployed: boolean }
-  > = {}
+  const deployed: Record<string, boolean> = {}
   if (fns) {
     const results = await Promise.all(
       fns.map((f) =>
         fetchFunctionRuntime(cookieHeader, f.slug)
-          .then(
-            (r) =>
-              [
-                f.slug,
-                { lifecycle: lifecycleFor(r), deployed: isDeployed(r) },
-              ] as const,
-          )
-          .catch(
-            () =>
-              [
-                f.slug,
-                {
-                  lifecycle: "unknown" as FunctionLifecycle,
-                  deployed: false,
-                },
-              ] as const,
-          ),
+          .then((r) => [f.slug, isDeployed(r)] as const)
+          .catch(() => [f.slug, false] as const),
       ),
     )
-    for (const [slug, s] of results) states[slug] = s
+    for (const [slug, d] of results) deployed[slug] = d
   }
 
   return (
@@ -134,7 +113,7 @@ export default async function FunctionsPage() {
                     <Badge variant="secondary">{fn.runtime}</Badge>
                   </TableCell>
                   <TableCell>
-                    {states[fn.slug]?.deployed ? (
+                    {deployed[fn.slug] ? (
                       <Badge variant={fn.exposed ? "default" : "outline"}>
                         {fn.exposed ? "Public URL" : "Internal"}
                       </Badge>
@@ -143,12 +122,11 @@ export default async function FunctionsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {(() => {
-                      const b = lifecycleBadge(
-                        states[fn.slug]?.lifecycle ?? "unknown",
-                      )
-                      return <Badge variant={b.variant}>{b.label}</Badge>
-                    })()}
+                    {deployed[fn.slug] ? (
+                      <Badge variant="default">Deployed</Badge>
+                    ) : (
+                      <Badge variant="outline">Draft</Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     <LocalTime iso={fn.createdAt} />
