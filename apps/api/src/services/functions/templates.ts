@@ -111,6 +111,8 @@ FUNCTION_INFO = {
     "function_version": os.environ.get("OS_FUNCTION_VERSION", ""),
     "function_target": os.environ.get("OS_FUNCTION_TARGET", ""),
     "function_namespace": os.environ.get("OS_FUNCTION_NAMESPACE", ""),
+    # Back-compat alias — older handlers used a single function_uri.
+    "function_uri": os.environ.get("OS_FUNCTION_EXTERNAL_URI", ""),
 }
 
 
