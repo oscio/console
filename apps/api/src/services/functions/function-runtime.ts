@@ -71,6 +71,13 @@ export function exposedUrl(slug: string): string {
   return `https://${functionHostname(slug)}`
 }
 
+// Cluster-local URL Knative auto-generates for the prod Service —
+// always reachable from in-cluster pods after Deploy, no Expose
+// needed. Mirror of how VMs get an internal Service DNS by default.
+export function internalUrl(slug: string): string {
+  return `http://${prodServiceName(slug)}.${RESOURCE_NS}.svc.cluster.local`
+}
+
 // Cluster-internal Kourier endpoint console-api proxies through. The
 // in-cluster DNS doesn't depend on the platform domain, so we keep
 // a fallback to the Knative-default service name.
@@ -288,13 +295,23 @@ function buildKnativeServiceBody(input: {
   // Lambda-style runtime metadata for the user's `handler(event,
   // context)`. Read from env at runner cold-start; the handler sees
   // them via the second argument (e.g. context["function_name"]).
-  // function_uri is the function's would-be public URL — always
-  // populated, but only resolves externally when Exposed.
+  //
+  // Two URIs by design (mirrors the VM model):
+  //   internal_uri — Knative's auto-generated cluster-local hostname.
+  //                  Always reachable from inside the cluster, even
+  //                  before the user toggles Expose.
+  //   external_uri — public URL through Traefik+HTTPRoute. Populated
+  //                  always (so the user can see the would-be value),
+  //                  but only resolves externally when Exposed.
   const env = [
     { name: "OS_FUNCTION_NAME", value: input.slug },
     { name: "OS_FUNCTION_TARGET", value: input.mode },
     { name: "OS_FUNCTION_NAMESPACE", value: RESOURCE_NS },
-    { name: "OS_FUNCTION_URI", value: exposedUrl(input.slug) },
+    {
+      name: "OS_FUNCTION_INTERNAL_URI",
+      value: `http://${input.name}.${RESOURCE_NS}.svc.cluster.local`,
+    },
+    { name: "OS_FUNCTION_EXTERNAL_URI", value: exposedUrl(input.slug) },
     {
       name: "OS_FUNCTION_VERSION",
       // Prod is pinned to a built image:<sha>; dev floats on the

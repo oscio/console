@@ -44,12 +44,13 @@ The platform's runner imports this file once on cold start and calls
   event   — dict shaped like AWS API Gateway HTTP API v2
             (event["requestContext"]["http"]["method"] etc.)
   context — dict with platform metadata about the running function:
-              function_name        — slug (e.g. "function-abcd1234")
-              function_uri         — public URL (live when Exposed)
-              function_version     — image tag ("dev" or commit SHA)
-              function_target      — "dev" (Save) or "prod" (Deploy)
-              function_namespace   — k8s namespace
-              request_id           — unique id for this invocation
+              function_name         — slug (e.g. "function-abcd1234")
+              function_internal_uri — cluster-local URL, always live
+              function_external_uri — public URL, live when Exposed
+              function_version      — image tag ("dev" or commit SHA)
+              function_target       — "dev" (Save) or "prod" (Deploy)
+              function_namespace    — k8s namespace
+              request_id            — unique id for this invocation
 
 Return a dict {statusCode, headers?, body?} and the runner maps it
 back to an HTTP response.
@@ -62,7 +63,9 @@ def handler(event, context):
     if method == "GET":
         return {
             "statusCode": 200,
-            "body": json.dumps({"message": "pong", "from": context["function_uri"]}),
+            "body": json.dumps(
+                {"message": "pong", "from": context["function_internal_uri"]}
+            ),
         }
     if method == "POST":
         try:
@@ -103,7 +106,8 @@ HANDLER_NAME = "handler"
 # dict on every invocation.
 FUNCTION_INFO = {
     "function_name": os.environ.get("OS_FUNCTION_NAME", ""),
-    "function_uri": os.environ.get("OS_FUNCTION_URI", ""),
+    "function_internal_uri": os.environ.get("OS_FUNCTION_INTERNAL_URI", ""),
+    "function_external_uri": os.environ.get("OS_FUNCTION_EXTERNAL_URI", ""),
     "function_version": os.environ.get("OS_FUNCTION_VERSION", ""),
     "function_target": os.environ.get("OS_FUNCTION_TARGET", ""),
     "function_namespace": os.environ.get("OS_FUNCTION_NAMESPACE", ""),

@@ -21,6 +21,10 @@ export type Func = {
   hostname: string
   // Full https URL when `exposed`, otherwise empty string.
   exposedUrl: string
+  // Cluster-local URL — always reachable from inside the cluster
+  // after Deploy (no Expose needed). Empty string before Deploy,
+  // since there's no prod Knative Service yet.
+  internalUrl: string
   // Kubernetes namespace this function's resources live in. Constant
   // ("resource") today, exposed for parity with VM/LB detail pages.
   namespace: string

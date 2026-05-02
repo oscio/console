@@ -24,6 +24,7 @@ import {
   exposedUrl,
   functionHostname,
   getRuntimeMode,
+  internalUrl,
   invokeFunction,
   productionImageRef,
   setProductionImage,
@@ -678,6 +679,11 @@ export class FunctionsService {
       exposed: row.exposed,
       hostname: functionHostname(row.slug),
       exposedUrl: row.exposed ? exposedUrl(row.slug) : "",
+      // Always-populated would-be cluster-local URL. Whether it's
+      // actually live depends on whether the prod Knative Service
+      // exists (i.e. the function has been Deployed) — the UI gates
+      // on `deployed` from the runtime endpoint, same as exposedUrl.
+      internalUrl: internalUrl(row.slug),
       namespace: RESOURCE_NS,
       forgejoUrl: this.forgejo.repoWebUrl(row.slug),
       createdAt: row.created_at.toISOString(),

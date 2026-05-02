@@ -620,6 +620,10 @@ export type Func = {
   hostname: string
   // Full https URL when `exposed`, otherwise empty string.
   exposedUrl: string
+  // Cluster-local URL (e.g. http://<slug>.<ns>.svc.cluster.local).
+  // Always live from inside the cluster after Deploy — Expose only
+  // adds the public surface on top.
+  internalUrl: string
   // Kubernetes namespace ("resource"). Surfaced for parity with the
   // VM/LB detail pages.
   namespace: string

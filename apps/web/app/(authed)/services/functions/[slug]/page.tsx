@@ -121,33 +121,49 @@ export default async function FunctionDetailPage({
         </div>
       </section>
 
-      <section className="space-y-2">
-        <h2 className="text-lg font-semibold">URL</h2>
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">URLs</h2>
         {!deployed ? (
           <p className="text-muted-foreground text-xs">
-            Not deployed yet — Deploy the function to bring up the
-            production Revision behind this address.
-          </p>
-        ) : !fn.exposed ? (
-          <p className="text-muted-foreground text-xs">
-            Not exposed — flip Exposure to publish at this address.
+            Not deployed yet — Deploy to bring up the production
+            Revision behind these addresses.
           </p>
         ) : null}
-        <a
-          href={`https://${fn.hostname}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`inline-flex items-center gap-2 font-mono text-sm ${
-            deployed && fn.exposed
-              ? "hover:underline"
-              : "text-muted-foreground"
-          }`}
-        >
-          {`https://${fn.hostname}`}
-          {deployed && fn.exposed && (
-            <ArrowSquareOut weight="bold" className="size-4" />
-          )}
-        </a>
+        <div className="space-y-2">
+          <div className="space-y-0.5">
+            <div className="text-muted-foreground text-xs">
+              Internal{deployed ? " (cluster-local)" : ""}
+            </div>
+            <span
+              className={`font-mono text-sm ${
+                deployed ? "" : "text-muted-foreground"
+              }`}
+            >
+              {fn.internalUrl}
+            </span>
+          </div>
+          <div className="space-y-0.5">
+            <div className="text-muted-foreground text-xs">
+              External
+              {deployed && !fn.exposed ? " — flip Exposure to publish" : ""}
+            </div>
+            <a
+              href={`https://${fn.hostname}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`inline-flex items-center gap-2 font-mono text-sm ${
+                deployed && fn.exposed
+                  ? "hover:underline"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {`https://${fn.hostname}`}
+              {deployed && fn.exposed && (
+                <ArrowSquareOut weight="bold" className="size-4" />
+              )}
+            </a>
+          </div>
+        </div>
       </section>
 
       <section className="space-y-2">
