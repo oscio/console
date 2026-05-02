@@ -121,6 +121,22 @@ export class FunctionsService {
         private: false,
       })
 
+      // Forgejo does not fire `on: push` for the initial commit that
+      // generate-from-template lays down, which leaves the lifecycle
+      // stuck at "draft" (no build run) and the Deploy button greyed
+      // out until the user makes a Save. Kick the workflow ourselves
+      // so the bootstrap build starts the moment the repo exists.
+      await this.forgejo
+        .dispatchWorkflow({
+          org: this.forgejo.functionOrg,
+          repo: slug,
+          workflow: "build.yml",
+          ref: "main",
+        })
+        .catch((err) =>
+          this.log.warn(`dispatchWorkflow ${slug}: ${(err as Error).message}`),
+        )
+
       // Stand up the dev runtime alongside the repo. Errors here
       // don't block create — Forgejo + DB row are already coherent
       // and the runtime can be retried via Save.

@@ -325,6 +325,30 @@ export class ForgejoClient {
     }
   }
 
+  // Manually trigger a workflow that supports `on: workflow_dispatch`.
+  // Used after `generateFromTemplate` because Forgejo doesn't fire the
+  // push event for the template-generated initial commit, so the very
+  // first build never runs unless we kick it off ourselves. 204 is
+  // "queued"; 404 means the workflow isn't on the ref or doesn't list
+  // workflow_dispatch as a trigger.
+  async dispatchWorkflow(input: {
+    org: string
+    repo: string
+    workflow: string
+    ref: string
+  }): Promise<void> {
+    const r = await this.request(
+      "POST",
+      `/api/v1/repos/${encodeURIComponent(input.org)}/${encodeURIComponent(input.repo)}/actions/workflows/${encodeURIComponent(input.workflow)}/dispatches`,
+      { ref: input.ref },
+    )
+    if (r.status !== 204 && r.status !== 200) {
+      throw new Error(
+        `Forgejo dispatchWorkflow(${input.org}/${input.repo}:${input.workflow}@${input.ref}) -> ${r.status}: ${r.text}`,
+      )
+    }
+  }
+
   // Promote a repo to template status. Idempotent: 200 either way.
   async markRepoAsTemplate(org: string, repo: string): Promise<void> {
     const r = await this.request(
